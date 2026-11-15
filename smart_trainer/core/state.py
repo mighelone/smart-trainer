@@ -1,4 +1,5 @@
 """Shared data types for live readings."""
+
 from __future__ import annotations
 
 import time
@@ -23,6 +24,7 @@ class ConnState(StrEnum):
 @dataclass(slots=True)
 class Reading:
     """A partial update from one device. Only non-None fields are meaningful."""
+
     device_id: str
     power: float | None = None
     cadence: float | None = None
@@ -35,6 +37,7 @@ class Reading:
 @dataclass(slots=True)
 class Snapshot:
     """Effective metrics for one second, after source selection."""
+
     power: float | None = None
     cadence: float | None = None
     speed_kmh: float | None = None

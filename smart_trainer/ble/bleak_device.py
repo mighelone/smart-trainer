@@ -1,4 +1,5 @@
 """Common BLE connection handling on top of bleak."""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,8 +22,9 @@ class BleakDevice(Device):
 
     async def run_connected(self) -> None:
         lost = asyncio.Event()
-        client = BleakClient(self.address, disconnected_callback=lambda _c: lost.set(),
-                             timeout=self.CONNECT_TIMEOUT)
+        client = BleakClient(
+            self.address, disconnected_callback=lambda _c: lost.set(), timeout=self.CONNECT_TIMEOUT
+        )
         log.info("%s: connecting", self.name)
         async with client:
             self.client = client

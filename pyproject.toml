@@ -16,7 +16,14 @@ dependencies = [
 smart-trainer = "smart_trainer.main:run"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "fitdecode>=0.10"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "fitdecode>=0.10",
+    "ruff>=0.17.5",
+    "pyrefly>=1.4.1",
+    "prek>=0.5.10",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,3 +33,15 @@ build-backend = "hatchling.build"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E731"]
+
+[tool.pyrefly]
+project-includes = ["smart_trainer", "tests"]
+python-interpreter-path = ".venv/bin/python"

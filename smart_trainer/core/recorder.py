@@ -1,4 +1,5 @@
 """Crash-safe session recording: one SQLite file per session, committed every second."""
+
 from __future__ import annotations
 
 import json
@@ -71,14 +72,17 @@ class Recorder:
         self.distance_m = 0.0
         self.lap = 0
         self._last_t: float | None = None
-        row = con.execute("SELECT MAX(lap) AS lap, MAX(distance_m) AS d, MAX(t) AS t FROM samples").fetchone()
+        row = con.execute(
+            "SELECT MAX(lap) AS lap, MAX(distance_m) AS d, MAX(t) AS t FROM samples"
+        ).fetchone()
         if row and row["t"] is not None:
             self.lap, self.distance_m, self._last_t = row["lap"] or 0, row["d"] or 0.0, row["t"]
 
     # -------------------------------------------------------------- lifecycle
     @classmethod
-    def create(cls, directory: Path, name: str, ftp: int, workout: Workout | None,
-               now: float | None = None) -> "Recorder":
+    def create(
+        cls, directory: Path, name: str, ftp: int, workout: Workout | None, now: float | None = None
+    ) -> Recorder:
         now = now or time.time()
         stamp = datetime.fromtimestamp(now).strftime("%Y%m%d-%H%M%S")
         path = directory / f"session-{stamp}.sqlite"
@@ -87,15 +91,23 @@ class Recorder:
         con.execute(
             "INSERT INTO session (id, status, started_at, updated_at, name, ftp, workout_json) "
             "VALUES (1, 'active', ?, ?, ?, ?, ?)",
-            (now, now, name, ftp, json.dumps(workout.to_dict()) if workout else None))
+            (now, now, name, ftp, json.dumps(workout.to_dict()) if workout else None),
+        )
         return cls(path, con)
 
     @classmethod
-    def open(cls, path: Path) -> "Recorder":
+    def open(cls, path: Path) -> Recorder:
         return cls(path, _connect(path))
 
-    def record(self, snap: Snapshot, elapsed: float, target: float | None, paused: bool,
-               mode: str, now: float | None = None) -> None:
+    def record(
+        self,
+        snap: Snapshot,
+        elapsed: float,
+        target: float | None,
+        paused: bool,
+        mode: str,
+        now: float | None = None,
+    ) -> None:
         now = now or time.time()
         if self._last_t is not None and not paused and snap.speed_kmh:
             dt = min(now - self._last_t, 5.0)  # don't invent distance across crash gaps
@@ -105,11 +117,26 @@ class Recorder:
             self.con.execute("BEGIN")
             self.con.execute(
                 "INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (now, elapsed, self.lap, int(paused), snap.power, snap.trainer_power,
-                 snap.pedal_power, snap.cadence, snap.hr, snap.speed_kmh, self.distance_m,
-                 target, snap.balance_left))
-            self.con.execute("UPDATE session SET updated_at=?, elapsed_s=?, mode=? WHERE id=1",
-                             (now, elapsed, mode))
+                (
+                    now,
+                    elapsed,
+                    self.lap,
+                    int(paused),
+                    snap.power,
+                    snap.trainer_power,
+                    snap.pedal_power,
+                    snap.cadence,
+                    snap.hr,
+                    snap.speed_kmh,
+                    self.distance_m,
+                    target,
+                    snap.balance_left,
+                ),
+            )
+            self.con.execute(
+                "UPDATE session SET updated_at=?, elapsed_s=?, mode=? WHERE id=1",
+                (now, elapsed, mode),
+            )
 
     def new_lap(self) -> None:
         self.lap += 1
@@ -135,8 +162,19 @@ def read_info(path: Path, con: sqlite3.Connection | None = None) -> SessionInfo:
         r = con.execute("SELECT * FROM session WHERE id=1").fetchone()
         n = con.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
         wo = Workout.from_dict(json.loads(r["workout_json"])) if r["workout_json"] else None
-        return SessionInfo(path, r["status"], r["name"], r["started_at"], r["updated_at"], r["ftp"],
-                           r["elapsed_s"], wo, r["upload_id"], r["upload_error"], n)
+        return SessionInfo(
+            path,
+            r["status"],
+            r["name"],
+            r["started_at"],
+            r["updated_at"],
+            r["ftp"],
+            r["elapsed_s"],
+            wo,
+            r["upload_id"],
+            r["upload_error"],
+            n,
+        )
     finally:
         if own:
             con.close()

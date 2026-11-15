@@ -1,5 +1,4 @@
 import json
-import os
 import signal
 import subprocess
 import sys
@@ -44,17 +43,30 @@ def test_resume_appends_and_exports_fit(tmp_path):
     for i in range(60):
         if i == 30:
             rec.new_lap()
-        rec.record(Snapshot(power=180 + i, cadence=90, hr=130, speed_kmh=30, balance_left=50),
-                   i, 175, False, "erg", now=t0 + i)
+        rec.record(
+            Snapshot(power=180 + i, cadence=90, hr=130, speed_kmh=30, balance_left=50),
+            i,
+            175,
+            False,
+            "erg",
+            now=t0 + i,
+        )
     rec.close()  # "crash"
 
     info = find_unfinished(tmp_path)[0]
+    assert info.workout is not None
     assert info.workout.name == "Cadence" and len(info.workout.steps) == len(wo.steps)
     rec = Recorder.open(info.path)
     assert rec.lap == 1 and rec.distance_m > 0
     for i in range(60, 90):  # resumed after a 2 minute gap
-        rec.record(Snapshot(power=200, cadence=90, hr=135, speed_kmh=30), i, 175, False, "erg",
-                   now=t0 + 120 + i)
+        rec.record(
+            Snapshot(power=200, cadence=90, hr=135, speed_kmh=30),
+            i,
+            175,
+            False,
+            "erg",
+            now=t0 + 120 + i,
+        )
     rec.record(Snapshot(power=0, cadence=0), 90, 175, True, "erg", now=t0 + 300)  # paused sample
     fit = export_fit(rec, tmp_path / "out.fit")
     rec.set_status("finished")
@@ -65,7 +77,8 @@ def test_resume_appends_and_exports_fit(tmp_path):
         for frame in fr:
             if isinstance(frame, fitdecode.FitDataMessage):
                 {"record": records, "lap": laps, "session": sessions, "event": events}.get(
-                    frame.name, []).append(frame)
+                    frame.name, []
+                ).append(frame)
     assert len(records) == 90  # paused sample excluded
     assert len(laps) == 2
     s = sessions[0]

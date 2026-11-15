@@ -1,4 +1,5 @@
 """FTMS smart trainer driver (Zwift Hub, Wahoo KICKR, Tacx Neo, Elite, Saris, ...)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +11,14 @@ from smart_trainer.ble import uuids
 from smart_trainer.ble.bleak_device import BleakDevice
 from smart_trainer.ble.device import ControllableTrainer, register
 from smart_trainer.ble.parsers import (
-    FtmsOp, cmd_request_control, cmd_set_simulation, cmd_set_target_power,
-    cmd_set_target_resistance, cmd_start, parse_control_response, parse_indoor_bike_data,
+    FtmsOp,
+    cmd_request_control,
+    cmd_set_simulation,
+    cmd_set_target_power,
+    cmd_set_target_resistance,
+    cmd_start,
+    parse_control_response,
+    parse_indoor_bike_data,
 )
 from smart_trainer.core.state import Reading, Role
 
@@ -38,8 +45,15 @@ class FtmsTrainer(BleakDevice, ControllableTrainer):
 
         def on_bike_data(_char, data: bytearray) -> None:
             d = parse_indoor_bike_data(bytes(data))
-            self.emit(Reading(self.id, power=d.power, cadence=d.cadence_rpm, speed_kmh=d.speed_kmh,
-                              hr=d.heart_rate or None))
+            self.emit(
+                Reading(
+                    self.id,
+                    power=d.power,
+                    cadence=d.cadence_rpm,
+                    speed_kmh=d.speed_kmh,
+                    hr=d.heart_rate or None,
+                )
+            )
 
         def on_cp(_char, data: bytearray) -> None:
             resp = parse_control_response(bytes(data))
