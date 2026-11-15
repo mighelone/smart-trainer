@@ -1,0 +1,28 @@
+[project]
+name = "smart-trainer"
+version = "0.1.0"
+description = "Indoor cycling smart-trainer app (BLE FTMS, power meter, HR) with intervals.icu sync"
+requires-python = ">=3.12"
+dependencies = [
+    "bleak>=0.22",
+    "nicegui>=2.0",
+    "httpx>=0.27",
+    "fit-tool>=0.9.13",
+    "pydantic>=2.7",
+    "keyring>=25",
+]
+
+[project.scripts]
+smart-trainer = "smart_trainer.main:run"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "fitdecode>=0.10"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

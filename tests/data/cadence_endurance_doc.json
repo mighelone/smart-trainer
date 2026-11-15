@@ -1,0 +1,17 @@
+{
+  "description": "Cadence Endurance",
+  "steps": [
+    {"text": "Warmup", "duration": 480, "ramp": true, "warmup": true,
+     "power": {"start": 45, "end": 75, "units": "%ftp"}, "cadence": {"value": 85, "units": "rpm"}},
+    {"reps": 3, "steps": [
+      {"text": "High Cadence", "duration": 360, "power": {"value": 70, "units": "%ftp"}, "cadence": {"value": 100, "units": "rpm"}},
+      {"text": "Low Cadence", "duration": 360, "power": {"value": 70, "units": "%ftp"}, "cadence": {"value": 70, "units": "rpm"}}
+    ]},
+    {"text": "Watts step", "duration": 60, "power": {"value": 200, "units": "w"}},
+    {"text": "Zone", "duration": 60, "power": {"value": 2, "units": "power_zone"}},
+    {"text": "Range", "duration": 60, "power": {"start": 60, "end": 70, "units": "%ftp"}},
+    {"text": "Free", "duration": 60, "freeride": true},
+    {"text": "Cooldown", "duration": 300, "ramp": true, "cooldown": true,
+     "power": {"start": 65, "end": 45, "units": "%ftp"}}
+  ]
+}
