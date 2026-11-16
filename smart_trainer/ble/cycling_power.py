@@ -14,6 +14,7 @@ from smart_trainer.core.state import Reading, Role
 @register
 class PowerMeter(BleakDevice):
     """Any BLE Cycling Power meter (Favero Assioma, Garmin Rally, Stages, Quarq, ...)."""
+
     DRIVER = "cycling_power"
     SERVICE_UUID = uuids.CYCLING_POWER_SERVICE
     ROLES = frozenset({Role.POWER, Role.CADENCE})

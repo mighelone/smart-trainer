@@ -3,12 +3,15 @@
 A driver declares the BLE service it handles and the roles it can provide. The core
 only talks to roles, so supporting a new device = adding one driver module.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, ClassVar
+from collections.abc import Callable
+from typing import ClassVar
 
 from smart_trainer.core.state import ConnState, Reading, Role
 
@@ -54,10 +57,8 @@ class Device(ABC):
         self._stop.set()
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
-            except (asyncio.CancelledError, Exception):
-                pass
         self.state = ConnState.DISCONNECTED
 
     async def _supervise(self) -> None:

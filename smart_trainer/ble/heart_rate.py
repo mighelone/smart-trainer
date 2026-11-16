@@ -12,6 +12,7 @@ from smart_trainer.core.state import Reading, Role
 @register
 class HeartRateMonitor(BleakDevice):
     """Any BLE heart-rate strap (Garmin HRM-Pro/Dual, Polar H10, Wahoo TICKR, ...)."""
+
     DRIVER = "heart_rate"
     SERVICE_UUID = uuids.HEART_RATE_SERVICE
     ROLES = frozenset({Role.HR})

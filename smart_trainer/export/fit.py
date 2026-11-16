@@ -1,6 +1,8 @@
 """Export a recorded session to a FIT activity file."""
+
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 from fit_tool.fit_file_builder import FitFileBuilder
@@ -11,7 +13,15 @@ from fit_tool.profile.messages.lap_message import LapMessage
 from fit_tool.profile.messages.record_message import RecordMessage
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.profile_type import (
-    Activity, Event, EventType, FileType, LapTrigger, Manufacturer, SessionTrigger, Sport, SubSport,
+    Activity,
+    Event,
+    EventType,
+    FileType,
+    LapTrigger,
+    Manufacturer,
+    SessionTrigger,
+    Sport,
+    SubSport,
 )
 
 from smart_trainer.core.recorder import Recorder
@@ -20,7 +30,7 @@ GAP_S = 5.0  # a hole longer than this (pause, crash) becomes a timer stop/start
 
 
 def _ms(t: float) -> int:
-    return int(round(t * 1000))
+    return round(t * 1000)
 
 
 def _stats(rows) -> dict:
@@ -32,8 +42,13 @@ def _stats(rows) -> dict:
         v = [r[key] for r in rows if r[key] is not None]
         return max(v) if v else None
 
-    return {"avg_power": avg("power"), "max_power": mx("power"), "avg_hr": avg("hr"),
-            "max_hr": mx("hr"), "avg_cad": avg("cadence")}
+    return {
+        "avg_power": avg("power"),
+        "max_power": mx("power"),
+        "avg_hr": avg("hr"),
+        "max_hr": mx("hr"),
+        "avg_cad": avg("cadence"),
+    }
 
 
 def _fill_summary(msg, rows, start: float, end: float, timer_s: float) -> None:
@@ -113,7 +128,7 @@ def export_fit(rec: Recorder, out_path: Path) -> Path:
         lap.event = Event.LAP
         lap.event_type = EventType.STOP
         lap.lap_trigger = LapTrigger.MANUAL
-        lt = sum(min(b2["t"] - a["t"], GAP_S) for a, b2 in zip(lr, lr[1:])) + 1
+        lt = sum(min(b2["t"] - a["t"], GAP_S) for a, b2 in pairwise(lr)) + 1
         _fill_summary(lap, lr, lr[0]["t"], lr[-1]["t"], lt)
         b.add(lap)
 

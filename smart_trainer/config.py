@@ -1,17 +1,22 @@
 """User settings persisted as JSON in ~/Library/Application Support/SmartTrainer/."""
+
 from __future__ import annotations
 
 import json
 import logging
 import os
 from pathlib import Path
+from typing import Self
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 log = logging.getLogger(__name__)
 
-APP_DIR = Path(os.environ.get("SMART_TRAINER_HOME",
-                              Path.home() / "Library" / "Application Support" / "SmartTrainer"))
+APP_DIR = Path(
+    os.environ.get(
+        "SMART_TRAINER_HOME", Path.home() / "Library" / "Application Support" / "SmartTrainer"
+    )
+)
 KEYRING_SERVICE = "smart-trainer"
 KEYRING_INTERVALS = "intervals.icu"
 
@@ -46,7 +51,7 @@ class Settings(BaseModel):
         return APP_DIR / "config.json"
 
     @classmethod
-    def load(cls) -> "Settings":
+    def load(cls) -> Self:
         p = cls.path()
         if p.exists():
             try:
@@ -76,6 +81,7 @@ def get_api_key() -> str | None:
         return key
     try:
         import keyring
+
         return keyring.get_password(KEYRING_SERVICE, KEYRING_INTERVALS)
     except Exception:
         log.exception("keyring unavailable")
@@ -84,4 +90,5 @@ def get_api_key() -> str | None:
 
 def set_api_key(key: str) -> None:
     import keyring
+
     keyring.set_password(KEYRING_SERVICE, KEYRING_INTERVALS, key)

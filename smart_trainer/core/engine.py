@@ -3,6 +3,7 @@
 Runs a 1 Hz loop on the asyncio event loop. The UI only reads engine state and calls
 its methods, so the engine is UI-agnostic.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,8 +46,9 @@ class HistoryPoint:
 
 
 class Engine:
-    def __init__(self, settings: Settings, sessions: Path | None = None,
-                 tick_s: float = 1.0) -> None:
+    def __init__(
+        self, settings: Settings, sessions: Path | None = None, tick_s: float = 1.0
+    ) -> None:
         self.settings = settings
         self.sessions = sessions or sessions_dir()
         self.tick_s = tick_s
@@ -92,8 +94,9 @@ class Engine:
         self._apply_assignment()
 
     def pair(self, dev: Device, roles: list[Role]) -> None:
-        self.settings.devices[dev.id] = PairedDevice(address=dev.address, name=dev.name,
-                                                     driver=dev.DRIVER)
+        self.settings.devices[dev.id] = PairedDevice(
+            address=dev.address, name=dev.name, driver=dev.DRIVER
+        )
         self.add_device(dev, roles)
         self.settings.save()
 
@@ -106,8 +109,9 @@ class Engine:
         self.selector.trainer_id = trainer_id
         dev = self.devices.get(trainer_id) if trainer_id else None
         self.controller.trainer = dev if isinstance(dev, ControllableTrainer) else None
-        self.controller.use_pedals = (self.settings.power_source == "pedals"
-                                      and ra.get(Role.POWER) not in (None, trainer_id))
+        self.controller.use_pedals = self.settings.power_source == "pedals" and ra.get(
+            Role.POWER
+        ) not in (None, trainer_id)
         self.controller.force_resend()
 
     def set_power_source(self, source: str) -> None:
@@ -120,8 +124,8 @@ class Engine:
         return self.devices.get(did) if did else None
 
     def trainer_connected(self) -> bool:
-        d = self.device_for(Role.TRAINER)
-        return bool(d and d.state == ConnState.CONNECTED)
+        device = self.device_for(Role.TRAINER)
+        return bool(device and device.state == ConnState.CONNECTED)
 
     # --------------------------------------------------------------------- loop
     def start(self) -> None:
@@ -152,7 +156,9 @@ class Engine:
         self.snapshot = snap
         target = None
         if self.state == RideState.RIDING:
-            pedaling = (snap.cadence or 0) >= AUTO_PAUSE_CADENCE or (snap.power or 0) >= AUTO_PAUSE_POWER
+            pedaling = (snap.cadence or 0) >= AUTO_PAUSE_CADENCE or (
+                snap.power or 0
+            ) >= AUTO_PAUSE_POWER
             self.auto_paused = not pedaling
             paused = self.manual_pause or self.auto_paused
             if self.runner:
@@ -163,18 +169,32 @@ class Engine:
                 if self._last_step is not None and idx != self._last_step and self.recorder:
                     self.recorder.new_lap()
                 self._last_step = idx
-                if self.runner.finished and target is None and "complete" not in "".join(self.messages):
+                if (
+                    self.runner.finished
+                    and target is None
+                    and "complete" not in "".join(self.messages)
+                ):
                     self.messages.append("Workout complete! Keep riding or press Finish.")
             self._update_control_mode(target)
             if not paused:
                 self.ride_seconds += self.tick_s
             if self.recorder:
-                self.recorder.record(snap, self.runner.elapsed if self.runner else self.ride_seconds,
-                                     target, paused, self.controller.mode.value, now_wall)
-            self.history.append(HistoryPoint(self.ride_seconds, snap.power, snap.hr, snap.cadence, target))
+                self.recorder.record(
+                    snap,
+                    self.runner.elapsed if self.runner else self.ride_seconds,
+                    target,
+                    paused,
+                    self.controller.mode.value,
+                    now_wall,
+                )
+            self.history.append(
+                HistoryPoint(self.ride_seconds, snap.power, snap.hr, snap.cadence, target)
+            )
         pedal_avg = self.selector.avg_power(self.selector.assignment.get(Role.POWER))
         trainer_avg = self.selector.avg_power(self.selector.trainer_id)
-        await self.controller.apply(snap, pedal_avg, trainer_avg, self.trainer_connected(), now_wall)
+        await self.controller.apply(
+            snap, pedal_avg, trainer_avg, self.trainer_connected(), now_wall
+        )
 
     def _update_control_mode(self, target: float | None) -> None:
         if self.runner is None:
@@ -192,20 +212,27 @@ class Engine:
     def start_ride(self, workout: Workout | None) -> None:
         name = workout.name if workout else f"Free ride {datetime.now():%d %b}"
         self.recorder = Recorder.create(self.sessions, name, self.settings.ftp, workout)
-        self.runner = WorkoutRunner(workout, self.settings.ftp) if workout and workout.steps else None
+        self.runner = (
+            WorkoutRunner(workout, self.settings.ftp) if workout and workout.steps else None
+        )
         self._begin()
 
     def resume_session(self, info: SessionInfo) -> None:
         """Continue a crashed session: same file, workout resumes at the saved elapsed time."""
         self.recorder = Recorder.open(info.path)
-        self.runner = (WorkoutRunner(info.workout, info.ftp, info.elapsed_s)
-                       if info.workout and info.workout.steps else None)
+        self.runner = (
+            WorkoutRunner(info.workout, info.ftp, info.elapsed_s)
+            if info.workout and info.workout.steps
+            else None
+        )
         self.history.clear()
         active = 0.0
         for r in self.recorder.samples():  # restore the chart from what was recorded
             if not r["paused"]:
                 active += self.tick_s
-            self.history.append(HistoryPoint(active, r["power"], r["hr"], r["cadence"], r["target"]))
+            self.history.append(
+                HistoryPoint(active, r["power"], r["hr"], r["cadence"], r["target"])
+            )
         self.ride_seconds = active
         self._begin(resumed=True)
 
@@ -275,10 +302,12 @@ class Engine:
             self.messages.append("No intervals.icu API key: saved locally only")
             return False
         from smart_trainer.sync.intervals import IntervalsClient
+
         client = IntervalsClient(key, self.settings.intervals_athlete_id)
         try:
             aid = await client.upload_activity(
-                fit, info.name, paired_event_id=info.workout.source_id if info.workout else None)
+                fit, info.name, paired_event_id=info.workout.source_id if info.workout else None
+            )
             rec.set_status("uploaded", upload_id=aid, upload_error=None)
             self.messages.append(f"Uploaded to intervals.icu ({aid})")
             return True

@@ -1,4 +1,5 @@
 """Reusable UI pieces."""
+
 from __future__ import annotations
 
 from nicegui import ui
@@ -42,8 +43,14 @@ def zone_color(watts: float | None, ftp: int) -> str:
     if watts is None:
         return "#64748b"
     r = watts / ftp
-    for limit, color in ((0.55, "#94a3b8"), (0.75, "#3b82f6"), (0.90, "#22c55e"),
-                         (1.05, "#eab308"), (1.20, "#f97316"), (9e9, "#ef4444")):
+    for limit, color in (
+        (0.55, "#94a3b8"),
+        (0.75, "#3b82f6"),
+        (0.90, "#22c55e"),
+        (1.05, "#eab308"),
+        (1.20, "#f97316"),
+        (9e9, "#ef4444"),
+    ):
         if r < limit:
             return color
     return "#ef4444"
@@ -52,12 +59,33 @@ def zone_color(watts: float | None, ftp: int) -> str:
 def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live: bool = True):
     total = workout.duration_s if workout else 600
     series = [
-        {"type": "line", "name": "Target", "data": [], "step": False, "showSymbol": False,
-         "lineStyle": {"width": 0}, "areaStyle": {"opacity": 0.45, "color": "#3b82f6"}, "z": 1},
-        {"type": "line", "name": "Power", "data": [], "showSymbol": False,
-         "lineStyle": {"width": 1.5, "color": "#facc15"}, "z": 3},
-        {"type": "line", "name": "HR", "data": [], "showSymbol": False, "yAxisIndex": 1,
-         "lineStyle": {"width": 1.5, "color": "#f43f5e"}, "z": 2},
+        {
+            "type": "line",
+            "name": "Target",
+            "data": [],
+            "step": False,
+            "showSymbol": False,
+            "lineStyle": {"width": 0},
+            "areaStyle": {"opacity": 0.45, "color": "#3b82f6"},
+            "z": 1,
+        },
+        {
+            "type": "line",
+            "name": "Power",
+            "data": [],
+            "showSymbol": False,
+            "lineStyle": {"width": 1.5, "color": "#facc15"},
+            "z": 3,
+        },
+        {
+            "type": "line",
+            "name": "HR",
+            "data": [],
+            "showSymbol": False,
+            "yAxisIndex": 1,
+            "lineStyle": {"width": 1.5, "color": "#f43f5e"},
+            "z": 2,
+        },
     ]
     if workout:
         pts = WorkoutRunner(workout, ftp).profile()
@@ -66,10 +94,17 @@ def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live:
         "animation": False,
         "grid": {"left": 45, "right": 45, "top": 15, "bottom": 25},
         "tooltip": {"trigger": "axis"},
-        "xAxis": {"type": "value", "min": 0, "max": total,
-                  "axisLabel": {":formatter": "v => Math.floor(v / 60) + \"'\""}, "splitLine": {"show": False}},
-        "yAxis": [{"type": "value", "name": "W", "min": 0, "splitLine": {"lineStyle": {"opacity": 0.15}}},
-                  {"type": "value", "name": "bpm", "min": 60, "max": 200, "splitLine": {"show": False}}],
+        "xAxis": {
+            "type": "value",
+            "min": 0,
+            "max": total,
+            "axisLabel": {":formatter": 'v => Math.floor(v / 60) + "\'"'},
+            "splitLine": {"show": False},
+        },
+        "yAxis": [
+            {"type": "value", "name": "W", "min": 0, "splitLine": {"lineStyle": {"opacity": 0.15}}},
+            {"type": "value", "name": "bpm", "min": 60, "max": 200, "splitLine": {"show": False}},
+        ],
         "series": series if live else series[:1],
     }
     chart = ui.echart(opts).classes(f"w-full {height}")

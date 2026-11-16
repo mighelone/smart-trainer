@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from smart_trainer.core.workout import WorkoutRunner, parse_intervals_doc, parse_zwo
 
 DOC = json.loads((Path(__file__).parent / "data" / "cadence_endurance_doc.json").read_text())
@@ -14,7 +16,7 @@ def test_parse_intervals_doc():
     assert warm.start == 0.45 and warm.end == 0.75 and warm.cadence == 85
     assert wo.steps[7].unit == "watts" and wo.steps[7].target_w(0, 250) == 200
     assert wo.steps[8].target_w(0, 250) == 0.65 * 250  # zone 2 midpoint
-    assert abs(wo.steps[9].target_w(0, 250) - 0.65 * 250) < 1e-9  # range -> midpoint
+    assert wo.steps[9].target_w(0, 250) == pytest.approx(0.65 * 250)  # range -> midpoint
     assert wo.steps[10].free_ride and wo.steps[10].target_w(0, 250) is None
 
 
@@ -23,11 +25,11 @@ def test_runner_ramp_skip_and_intensity():
     r = WorkoutRunner(wo, ftp=200)
     assert r.target_w() == 90  # 45 % of 200
     r.advance(240)
-    assert abs(r.target_w() - 120) < 1e-9  # halfway up the ramp: 60 %
+    assert r.target_w() == pytest.approx(120)  # halfway up the ramp: 60 %
     r.skip()
     assert r.step_index() == 1 and r.target_w() == 140
     r.intensity = 1.1
-    assert abs(r.target_w() - 154) < 1e-9
+    assert r.target_w() == pytest.approx(154)
     r.paused = True
     r.advance(30)
     assert r.elapsed == 480

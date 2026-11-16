@@ -1,4 +1,5 @@
 """Sync provider interface. intervals.icu now; Garmin Connect can be added later."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -23,5 +24,6 @@ class SyncProvider(Protocol):
 
     async def list_workouts(self, oldest: date, newest: date, ftp: int) -> list[PlannedWorkout]: ...
 
-    async def upload_activity(self, fit_path: Path, name: str, description: str = "",
-                              paired_event_id: str | None = None) -> str: ...
+    async def upload_activity(
+        self, fit_path: Path, name: str, description: str = "", paired_event_id: str | None = None
+    ) -> str: ...

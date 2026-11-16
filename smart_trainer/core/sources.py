@@ -1,4 +1,5 @@
 """Combine readings from all devices into one effective Snapshot per second."""
+
 from __future__ import annotations
 
 import time

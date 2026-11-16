@@ -2,6 +2,7 @@
 
 All functions are side-effect free so they can be unit tested with captured payloads.
 """
+
 from __future__ import annotations
 
 import struct
@@ -61,8 +62,9 @@ def parse_cycling_power(data: bytes) -> CyclingPower:
     if flags & 0x0020:  # crank revolution data
         crank_revs, crank_time = struct.unpack_from("<HH", data, i)
         i += 4
-    return CyclingPower(power=power, balance_left_pct=balance, crank_revs=crank_revs,
-                        crank_event_time=crank_time)
+    return CyclingPower(
+        power=power, balance_left_pct=balance, crank_revs=crank_revs, crank_event_time=crank_time
+    )
 
 
 class CadenceCalculator:
@@ -122,7 +124,7 @@ def parse_indoor_bike_data(data: bytes) -> IndoorBikeData:
     if flags & 0x0008:  # average cadence
         i += 2
     if flags & 0x0010:  # total distance uint24
-        out.distance_m = int.from_bytes(data[i:i + 3], "little")
+        out.distance_m = int.from_bytes(data[i : i + 3], "little")
         i += 3
     if flags & 0x0020:  # resistance level sint16
         out.resistance_level = struct.unpack_from("<h", data, i)[0]
@@ -161,28 +163,35 @@ def cmd_start() -> bytes:
 
 
 def cmd_set_target_power(watts: int) -> bytes:
-    watts = max(0, min(int(round(watts)), 2000))
+    watts = max(0, min(round(watts), 2000))
     return struct.pack("<Bh", FtmsOp.SET_TARGET_POWER, watts)
 
 
 def cmd_set_target_resistance(level_pct: float) -> bytes:
     """Resistance as 0-100 %. FTMS spec unit is 0.1 (uint8 in v1.0, many trainers accept 0-200)."""
     level = max(0.0, min(level_pct, 100.0))
-    return struct.pack("<BB", FtmsOp.SET_TARGET_RESISTANCE, int(round(level * 2)) & 0xFF)
+    return struct.pack("<BB", FtmsOp.SET_TARGET_RESISTANCE, round(level * 2) & 0xFF)
 
 
-def cmd_set_simulation(grade_pct: float, wind_mps: float = 0.0, crr: float = 0.004,
-                       cw: float = 0.51) -> bytes:
+def cmd_set_simulation(
+    grade_pct: float, wind_mps: float = 0.0, crr: float = 0.004, cw: float = 0.51
+) -> bytes:
     grade_pct = max(-20.0, min(grade_pct, 20.0))
-    return struct.pack("<BhhBB", FtmsOp.SET_SIMULATION, int(round(wind_mps * 1000)),
-                       int(round(grade_pct * 100)), int(round(crr * 10000)) & 0xFF,
-                       int(round(cw * 100)) & 0xFF)
+    return struct.pack(
+        "<BhhBB",
+        FtmsOp.SET_SIMULATION,
+        round(wind_mps * 1000),
+        round(grade_pct * 100),
+        round(crr * 10000) & 0xFF,
+        round(cw * 100) & 0xFF,
+    )
 
 
 @dataclass(slots=True)
 class ControlResponse:
     request_op: int
-    result: int  # 0x01 success, 0x02 not supported, 0x03 invalid param, 0x04 failed, 0x05 not permitted
+    # 0x01 success, 0x02 not supported, 0x03 invalid param, 0x04 failed, 0x05 not permitted
+    result: int
 
     @property
     def ok(self) -> bool:

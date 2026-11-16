@@ -1,8 +1,13 @@
 import struct
 
 from smart_trainer.ble.parsers import (
-    CadenceCalculator, cmd_set_simulation, cmd_set_target_power, parse_control_response,
-    parse_cycling_power, parse_heart_rate, parse_indoor_bike_data,
+    CadenceCalculator,
+    cmd_set_simulation,
+    cmd_set_target_power,
+    parse_control_response,
+    parse_cycling_power,
+    parse_heart_rate,
+    parse_indoor_bike_data,
 )
 
 
@@ -50,7 +55,11 @@ def test_indoor_bike_data_zwift_hub_style():
 
 def test_indoor_bike_data_with_distance_and_resistance():
     flags = 0x0010 | 0x0020 | 0x0040
-    data = struct.pack("<HH", flags, 1000) + (12345).to_bytes(3, "little") + struct.pack("<hh", 30, 180)
+    data = (
+        struct.pack("<HH", flags, 1000)
+        + (12345).to_bytes(3, "little")
+        + struct.pack("<hh", 30, 180)
+    )
     d = parse_indoor_bike_data(data)
     assert d.distance_m == 12345 and d.resistance_level == 30 and d.power == 180
 

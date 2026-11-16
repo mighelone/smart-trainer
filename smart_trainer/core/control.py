@@ -1,4 +1,5 @@
 """Trainer control modes and pedal power matching."""
+
 from __future__ import annotations
 
 import logging
@@ -40,8 +41,14 @@ class PowerMatcher:
         self.integral = 0.0
         self._last_target = None
 
-    def command(self, target: float, snap: Snapshot, pedal_avg: float | None,
-                trainer_avg: float | None, now: float | None = None) -> float:
+    def command(
+        self,
+        target: float,
+        snap: Snapshot,
+        pedal_avg: float | None,
+        trainer_avg: float | None,
+        now: float | None = None,
+    ) -> float:
         now = now if now is not None else time.monotonic()
         c = self.cfg
         if self._last_target is None or abs(target - self._last_target) >= 1:
@@ -85,8 +92,13 @@ class TrainerController:
     def force_resend(self) -> None:
         self.last_command = None
 
-    def compute(self, snap: Snapshot, pedal_avg: float | None, trainer_avg: float | None,
-                now: float | None = None) -> tuple[Mode, float]:
+    def compute(
+        self,
+        snap: Snapshot,
+        pedal_avg: float | None,
+        trainer_avg: float | None,
+        now: float | None = None,
+    ) -> tuple[Mode, float]:
         if self.mode == Mode.ERG:
             target = self.erg_target
             if self.use_pedals and snap.pedal_power is not None:
@@ -96,16 +108,25 @@ class TrainerController:
             return Mode.RESISTANCE, self.resistance_pct
         return Mode.SLOPE, self.slope_pct
 
-    async def apply(self, snap: Snapshot, pedal_avg: float | None, trainer_avg: float | None,
-                    connected: bool, now: float | None = None) -> tuple[Mode, float] | None:
+    async def apply(
+        self,
+        snap: Snapshot,
+        pedal_avg: float | None,
+        trainer_avg: float | None,
+        connected: bool,
+        now: float | None = None,
+    ) -> tuple[Mode, float] | None:
         if self.trainer is None or not connected:
             self.last_command = None  # resend everything after reconnect
             return None
         now = now if now is not None else time.monotonic()
         mode, value = self.compute(snap, pedal_avg, trainer_avg, now)
         rounded = round(value) if mode == Mode.ERG else round(value, 1)
-        changed = (self.last_command is None or self.last_command[0] != mode
-                   or abs(self.last_command[1] - rounded) >= (1 if mode == Mode.ERG else 0.1))
+        changed = (
+            self.last_command is None
+            or self.last_command[0] != mode
+            or abs(self.last_command[1] - rounded) >= (1 if mode == Mode.ERG else 0.1)
+        )
         if not changed and now - self._last_sent_at < self.RESEND_S:
             return None
         try:

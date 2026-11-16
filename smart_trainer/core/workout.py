@@ -1,4 +1,5 @@
 """Workout model, parsers (intervals.icu workout_doc, Zwift .zwo) and runner."""
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -41,9 +42,13 @@ class Workout:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Workout":
-        return cls(name=d["name"], steps=[Step(**s) for s in d.get("steps", [])],
-                   description=d.get("description", ""), source_id=d.get("source_id"))
+    def from_dict(cls, d: dict) -> Workout:
+        return cls(
+            name=d["name"],
+            steps=[Step(**s) for s in d.get("steps", [])],
+            description=d.get("description", ""),
+            source_id=d.get("source_id"),
+        )
 
     def step_starts(self) -> list[int]:
         out, t = [], 0
@@ -74,8 +79,9 @@ def _icu_power(p: dict | None, ftp: int) -> tuple[float, float | None, str] | No
     return None
 
 
-def parse_intervals_doc(doc: dict, name: str = "Workout", ftp: int = 250,
-                        source_id: str | None = None) -> Workout:
+def parse_intervals_doc(
+    doc: dict, name: str = "Workout", ftp: int = 250, source_id: str | None = None
+) -> Workout:
     steps: list[Step] = []
 
     def walk(items: list[dict]) -> None:
@@ -100,12 +106,16 @@ def parse_intervals_doc(doc: dict, name: str = "Workout", ftp: int = 250,
                 start, end, unit = pw
                 if not it.get("ramp") and end is not None:
                     start, end = (start + end) / 2, None  # range target -> midpoint
-                steps.append(Step(dur, start, end, unit, text=text,
-                                  cadence=int(cadence) if cadence else None))
+                steps.append(
+                    Step(
+                        dur, start, end, unit, text=text, cadence=int(cadence) if cadence else None
+                    )
+                )
 
     walk(doc.get("steps", []))
-    return Workout(name=name, steps=steps, description=doc.get("description", "") or "",
-                   source_id=source_id)
+    return Workout(
+        name=name, steps=steps, description=doc.get("description", "") or "", source_id=source_id
+    )
 
 
 # ------------------------------------------------------------------ Zwift .zwo
@@ -120,7 +130,7 @@ def parse_zwo(xml_text: str) -> Workout:
     for el in container:
         tag = el.tag.lower()
         a = el.attrib
-        f = lambda k, d=0.0: float(a.get(k, d))  # noqa: E731
+        f = lambda k, d=0.0, a=a: float(a.get(k, d))  # noqa: E731
         cad = int(f("Cadence")) if "Cadence" in a else None
         if tag == "steadystate":
             steps.append(Step(int(f("Duration")), f("Power"), cadence=cad))
@@ -181,12 +191,14 @@ class WorkoutRunner:
 
     def skip(self) -> None:
         i = self.step_index() + 1
-        self.elapsed = float(self._starts[i]) if i < len(self._starts) else float(self.workout.duration_s)
+        self.elapsed = (
+            float(self._starts[i]) if i < len(self._starts) else float(self.workout.duration_s)
+        )
 
     def profile(self) -> list[tuple[int, float]]:
         """(t, watts) points for drawing the workout chart."""
         pts: list[tuple[int, float]] = []
-        for start, st in zip(self._starts, self.workout.steps):
+        for start, st in zip(self._starts, self.workout.steps, strict=True):
             a = st.target_w(0, self.ftp) or 0
             b = st.target_w(1, self.ftp) or 0
             pts += [(start, a), (start + st.duration_s, b)]

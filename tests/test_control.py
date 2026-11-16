@@ -10,7 +10,9 @@ def simulate(bias: float, target: float, seconds: int = 240, matcher=None):
     for t in range(seconds):
         true_power += (cmd / bias - true_power) * 0.5
         snap = Snapshot(power=true_power, pedal_power=true_power, cadence=90)
-        cmd = m.command(target, snap, pedal_avg=true_power, trainer_avg=true_power * bias, now=float(t))
+        cmd = m.command(
+            target, snap, pedal_avg=true_power, trainer_avg=true_power * bias, now=float(t)
+        )
     return true_power, m
 
 

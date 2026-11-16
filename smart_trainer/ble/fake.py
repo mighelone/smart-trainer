@@ -3,6 +3,7 @@
 A shared FakeWorld models the rider's *true* power. The fake trainer over-reads by
 `trainer_bias` (default +4 %) so pedal power matching has something to correct.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -86,9 +87,14 @@ class FakePowerMeter(_FakeBase):
         w = self.world
         if not w.pedals_alive:
             return
-        self.emit(Reading(self.id, power=round(w.true_power + random.uniform(-4, 4)),
-                          cadence=w.cadence + random.uniform(-1, 1),
-                          balance_left=50 + random.uniform(-2, 2)))
+        self.emit(
+            Reading(
+                self.id,
+                power=round(w.true_power + random.uniform(-4, 4)),
+                cadence=w.cadence + random.uniform(-1, 1),
+                balance_left=50 + random.uniform(-2, 2),
+            )
+        )
 
 
 @register
@@ -102,7 +108,7 @@ class FakeHeartRate(_FakeBase):
     def step(self) -> None:
         w = self.world
         w.hr += ((60 + 0.42 * w.true_power) - w.hr) * 0.05
-        self.emit(Reading(self.id, hr=int(round(w.hr))))
+        self.emit(Reading(self.id, hr=round(w.hr)))
 
 
 def fake_devices() -> list[Device]:
