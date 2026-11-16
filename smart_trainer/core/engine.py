@@ -124,8 +124,8 @@ class Engine:
         return self.devices.get(did) if did else None
 
     def trainer_connected(self) -> bool:
-        d = self.device_for(Role.TRAINER)
-        return bool(d and d.state == ConnState.CONNECTED)
+        device = self.device_for(Role.TRAINER)
+        return bool(device and device.state == ConnState.CONNECTED)
 
     # --------------------------------------------------------------------- loop
     def start(self) -> None:
