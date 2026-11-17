@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
+from smart_trainer.config import DEFAULT_POWER_ZONES
 from smart_trainer.core.workout import Workout, WorkoutRunner
 
 
@@ -75,31 +76,71 @@ class Tile:
         self.value.set_text(value)
         self.sub.set_text(sub)
 
+    def set_color(self, color: str | None) -> None:
+        """Override the value color (``None`` restores the default classes).
 
-def zone_color(watts: float | None, ftp: int) -> str:
-    """Color for a power value according to its Coggan power zone.
+        Args:
+            color (str | None): CSS color, e.g. a zone color.
+        """
+        if color != getattr(self, "_color", None):
+            self._color = color
+            self.value.style(replace=f"color: {color}" if color else "")
+
+
+ZONE_COLORS = ("#94a3b8", "#3b82f6", "#22c55e", "#eab308", "#f97316", "#ef4444", "#a855f7")
+NO_ZONE_COLOR = "#64748b"
+
+
+def zone_index(value: float, bounds: list[int] | tuple[int, ...]) -> int:
+    """0-based zone of a value, given ascending zone upper bounds.
+
+    Args:
+        value (float): The value (same unit as ``bounds``).
+        bounds (list[int] | tuple[int, ...]): Zone upper bounds; the last zone is open-ended.
+
+    Returns:
+        int: Zone index, at most ``len(bounds) - 1``.
+    """
+    for i, upper in enumerate(bounds):
+        if value < upper:
+            return i
+    return len(bounds) - 1
+
+
+def _color(i: int) -> str:
+    """Color of the ``i``-th zone (the last color repeats past seven zones)."""
+    return ZONE_COLORS[min(i, len(ZONE_COLORS) - 1)]
+
+
+def zone_color(watts: float | None, ftp: int, zones: list[int] | None = None) -> str:
+    """Color for a power value according to the rider's power zone.
 
     Args:
         watts (float | None): Power in watts.
         ftp (int): Rider's FTP in watts.
+        zones (list[int] | None): Zone upper bounds as % of FTP; ``None`` uses Coggan zones.
 
     Returns:
         str: Hex color string (grey if ``watts`` is ``None``).
     """
-    if watts is None:
-        return "#64748b"
-    r = watts / ftp
-    for limit, color in (
-        (0.55, "#94a3b8"),
-        (0.75, "#3b82f6"),
-        (0.90, "#22c55e"),
-        (1.05, "#eab308"),
-        (1.20, "#f97316"),
-        (9e9, "#ef4444"),
-    ):
-        if r < limit:
-            return color
-    return "#ef4444"
+    if watts is None or ftp <= 0:
+        return NO_ZONE_COLOR
+    return _color(zone_index(watts / ftp * 100, zones or DEFAULT_POWER_ZONES))
+
+
+def hr_zone_color(bpm: float | None, hr_zones: list[int]) -> str | None:
+    """Color for a heart rate according to the rider's HR zones.
+
+    Args:
+        bpm (float | None): Heart rate in bpm.
+        hr_zones (list[int]): HR zone upper bounds in bpm.
+
+    Returns:
+        str | None: Hex color string, or ``None`` if HR or zones are unknown.
+    """
+    if bpm is None or not hr_zones:
+        return None
+    return _color(zone_index(bpm, hr_zones))
 
 
 def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live: bool = True):

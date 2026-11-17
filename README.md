@@ -49,7 +49,9 @@ The first time you scan, macOS asks for Bluetooth permission for your terminal a
 Turn it on in System Settings → Privacy & Security → Bluetooth.
 
 ## First setup
-1. **Settings:** enter your FTP and your intervals.icu API key (intervals.icu → Settings → Developer Settings). The key is stored in the macOS Keychain.
+1. **Settings:** enter your intervals.icu API key (intervals.icu → Settings → Developer Settings). The key is stored in the macOS Keychain.
+   Your FTP (the Ride indoor FTP when set), weight, and power and HR zones are then synced from intervals.icu at every launch and with **Sync now**.
+   To enter FTP and weight by hand instead, turn off *Sync FTP, zones and weight from intervals.icu*.
 2. **Devices:** wake up the devices (pedal a few turns, put on the strap), then press **Scan**.
    - Zwift Hub → *Use as trainer*
    - Assioma → *Use for power*

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from nicegui import ui
 
@@ -14,14 +14,21 @@ from smart_trainer.ble.device import (
     CalibrationKind,
     CalibrationPhase,
 )
-from smart_trainer.config import get_api_key, set_api_key
+from smart_trainer.config import Settings, get_api_key, set_api_key
 from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine, HistoryPoint, RideState
 from smart_trainer.core.library import builtin_workouts
 from smart_trainer.core.recorder import Recorder, list_sessions
 from smart_trainer.core.state import ConnState, Role
 from smart_trainer.core.workout import Workout, parse_zwo
-from smart_trainer.ui.widgets import Tile, fmt, fmt_time, workout_chart
+from smart_trainer.ui.widgets import (
+    Tile,
+    fmt,
+    fmt_time,
+    hr_zone_color,
+    workout_chart,
+    zone_color,
+)
 
 log = logging.getLogger(__name__)
 
@@ -328,6 +335,7 @@ def ride_page() -> None:
             else ""
         )
         t_power.set(fmt(p3), sub)
+        t_power.set_color(zone_color(p3, ftp, e.settings.power_zones) if p3 is not None else None)
         target = e.current_target()
         cmd = e.controller.last_command
         t_target.set(
@@ -337,6 +345,7 @@ def ride_page() -> None:
             else e.controller.mode.value,
         )
         t_hr.set(fmt(snap.hr))
+        t_hr.set_color(hr_zone_color(snap.hr, e.settings.hr_zones))
         t_cad.set(fmt(snap.cadence))
         t_speed.set(fmt(snap.speed_kmh, 1))
         t_bal.set(
@@ -514,7 +523,10 @@ def workouts_page() -> None:
         try:
             today = date.today()
             planned = await client.list_workouts(
-                today - timedelta(days=2), today + timedelta(days=7), e.settings.ftp
+                today - timedelta(days=2),
+                today + timedelta(days=7),
+                e.settings.ftp,
+                e.settings.power_zones,
             )
         except Exception as exc:
             status.set_text(f"Could not load workouts: {exc}")
@@ -840,6 +852,40 @@ def history_page() -> None:
 
 
 # ================================================================= SETTINGS
+def profile_summary(st: Settings) -> str:
+    """Describe the synced zones and the last sync time.
+
+    Args:
+        st (Settings): The settings to describe.
+
+    Returns:
+        str: Multi-line summary.
+    """
+    lines = []
+    if st.power_zones:
+        parts = []
+        for i, pct in enumerate(st.power_zones):
+            name = f"Z{i + 1}"
+            if i == len(st.power_zones) - 1:
+                lower = st.power_zones[i - 1] if i else 0
+                parts.append(f"{name} ≥{round(lower * st.ftp / 100)} W")
+            else:
+                parts.append(f"{name} <{round(pct * st.ftp / 100)} W")
+        lines.append("Power zones: " + " · ".join(parts))
+    if st.hr_zones:
+        lines.append("HR zones: " + " · ".join(f"Z{i + 1} ≤{b}" for i, b in enumerate(st.hr_zones)))
+    hr = [f"LTHR {st.lthr} bpm" if st.lthr else "", f"max HR {st.max_hr} bpm" if st.max_hr else ""]
+    if any(hr):
+        lines.append(" · ".join(x for x in hr if x))
+    when = (
+        datetime.fromtimestamp(st.profile_synced_at).strftime("%Y-%m-%d %H:%M")
+        if st.profile_synced_at
+        else "never"
+    )
+    lines.append(f"Last synced: {when}")
+    return "\n".join(lines)
+
+
 @ui.page("/settings")
 def settings_page() -> None:
     """Settings page: rider profile, intervals.icu and power matching."""
@@ -847,8 +893,50 @@ def settings_page() -> None:
     st = e.settings
     frame("Settings")
     with ui.column().classes("p-4 gap-3 w-full max-w-xl [&_.q-field]:w-full"):
+        ui.label("Rider profile").classes("text-lg font-bold")
+        sync = ui.switch("Sync FTP, zones and weight from intervals.icu", value=st.sync_profile)
         ftp = ui.number("FTP (W)", value=st.ftp, min=50, max=600, step=1)
         weight = ui.number("Weight (kg)", value=st.weight_kg, min=30, max=200, step=0.5)
+        summary = ui.label("").classes("text-sm opacity-70 whitespace-pre-line")
+        sync_btn = ui.button("Sync now", icon="sync", on_click=lambda: sync_now())
+
+        def refresh_profile() -> None:
+            """Show the current profile and lock the fields while syncing is on."""
+            ftp.value, weight.value = st.ftp, st.weight_kg
+            on = bool(sync.value)
+            for field in (ftp, weight):
+                if on:
+                    field.props("readonly")
+                else:
+                    field.props(remove="readonly")
+            sync_btn.set_visibility(on)
+            summary.set_visibility(on)
+            summary.set_text(profile_summary(st))
+
+        async def sync_now() -> None:
+            """Fetch the profile from intervals.icu and show the result."""
+            sync_btn.props("loading")
+            try:
+                changed = await e.sync_profile()
+            finally:
+                sync_btn.props(remove="loading")
+            if changed is None:
+                ui.notify(e.messages[-1] if e.messages else "Sync failed", type="negative")
+            else:
+                text = f"Updated {', '.join(changed)}" if changed else "Already up to date"
+                ui.notify(text, type="positive")
+            refresh_profile()
+
+        async def toggle_sync() -> None:
+            """Persist the sync switch; sync right away when it is turned on."""
+            st.sync_profile = bool(sync.value)
+            st.save()
+            refresh_profile()
+            if st.sync_profile and get_api_key():
+                await sync_now()
+
+        sync.on_value_change(toggle_sync)
+        refresh_profile()
         ui.separator()
         ui.label("intervals.icu").classes("text-lg font-bold")
         ui.label(
@@ -876,19 +964,23 @@ def settings_page() -> None:
             """Validate the form values and persist the settings."""
             # ui.number yields None when a field is cleared: keep the current value then.
             pm = st.power_match
-            st.ftp = int(ftp.value) if ftp.value is not None else st.ftp
-            st.weight_kg = float(weight.value) if weight.value is not None else st.weight_kg
+            if not st.sync_profile:  # synced values come from intervals.icu only
+                st.ftp = int(ftp.value) if ftp.value is not None else st.ftp
+                st.weight_kg = float(weight.value) if weight.value is not None else st.weight_kg
             st.intervals_athlete_id = athlete.value.strip() or "0"
             st.auto_upload = bool(auto.value)
             if max_off.value is not None:
                 pm.max_offset_w = float(max_off.value)
             if settle.value is not None:
                 pm.settle_s = float(settle.value)
-            if key.value:
+            new_key = bool(key.value)
+            if new_key:
                 set_api_key(key.value.strip())
                 key.value = ""
             st.save()
             ui.notify("Settings saved", type="positive")
+            if new_key and st.sync_profile:
+                await sync_now()
 
         async def test_key() -> None:
             """Check the intervals.icu API key by fetching the athlete profile."""

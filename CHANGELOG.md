@@ -18,6 +18,11 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
     showing the offset the meter reports.
   Calibration is disabled during a ride, trainer control pauses during a spin-down, and `--fake`
   simulates both flows.
+- Rider profile sync from intervals.icu: FTP (the Ride indoor FTP when set), weight, power and
+  HR zones, LTHR and max HR. It runs at launch and from **Settings → Sync now**. Synced fields
+  are read-only; turn the switch off to enter them by hand. Rides in progress are never changed.
+- Zone targets in intervals.icu workouts use your own power zones.
+- Power and heart-rate tiles on the ride screen are coloured by zone.
 
 ## [0.1.0] - 2026-11-17
 

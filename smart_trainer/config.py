@@ -19,6 +19,8 @@ APP_DIR = Path(
 )
 KEYRING_SERVICE = "smart-trainer"
 KEYRING_INTERVALS = "intervals.icu"
+# Coggan power zone upper bounds, % of FTP (the last zone is open-ended)
+DEFAULT_POWER_ZONES = (55, 75, 90, 105, 120, 150, 999)
 
 
 class PairedDevice(BaseModel):
@@ -66,6 +68,13 @@ class Settings(BaseModel):
         role_assignment (dict[str, str]): Device id assigned to each role.
         power_match (PowerMatch): Pedal power matching parameters.
         auto_upload (bool): Upload finished rides to intervals.icu automatically.
+        sync_profile (bool): Keep FTP, weight and zones in sync with intervals.icu.
+        power_zones (list[int]): Power zone upper bounds as % of FTP (last is open-ended).
+        power_zone_names (list[str]): Power zone names.
+        hr_zones (list[int]): Heart-rate zone upper bounds in bpm.
+        lthr (int | None): Lactate threshold heart rate in bpm.
+        max_hr (int | None): Maximum heart rate in bpm.
+        profile_synced_at (float | None): Epoch seconds of the last profile sync.
     """
 
     ftp: int = 250
@@ -76,6 +85,13 @@ class Settings(BaseModel):
     role_assignment: dict[str, str] = Field(default_factory=dict)  # role -> device id
     power_match: PowerMatch = Field(default_factory=PowerMatch)
     auto_upload: bool = True
+    sync_profile: bool = True
+    power_zones: list[int] = Field(default_factory=lambda: list(DEFAULT_POWER_ZONES))
+    power_zone_names: list[str] = Field(default_factory=list)
+    hr_zones: list[int] = Field(default_factory=list)
+    lthr: int | None = None
+    max_hr: int | None = None
+    profile_synced_at: float | None = None
     _readonly: bool = PrivateAttr(default=False)  # demo mode: never write config
 
     @classmethod
