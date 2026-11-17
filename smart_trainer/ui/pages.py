@@ -21,13 +21,14 @@ from smart_trainer.core.library import builtin_workouts
 from smart_trainer.core.recorder import Recorder, list_sessions
 from smart_trainer.core.state import ConnState, Role
 from smart_trainer.core.workout import Workout, parse_zwo
+from smart_trainer.ui.theme import apply_theme
 from smart_trainer.ui.widgets import (
     Tile,
     fmt,
     fmt_time,
-    hr_zone_color,
+    hr_zone,
+    power_zone,
     workout_chart,
-    zone_color,
 )
 
 log = logging.getLogger(__name__)
@@ -49,10 +50,11 @@ class AppState:
 
 S = AppState()
 
-STATE_COLOR = {
-    ConnState.CONNECTED: "positive",
-    ConnState.CONNECTING: "warning",
-    ConnState.DISCONNECTED: "negative",
+DOT_COLOR = {
+    ConnState.CONNECTED: "#22c55e",
+    ConnState.CONNECTING: "#f59e0b",
+    ConnState.DISCONNECTED: "#ef4444",
+    None: "#5b6774",
 }
 ROLE_ICON = {
     Role.TRAINER: "pedal_bike",
@@ -69,13 +71,13 @@ def frame(title: str) -> None:
     Args:
         title (str): Page title shown in the header.
     """
-    with ui.header().classes("items-center justify-between px-4 py-2 bg-slate-900"):
-        with ui.row().classes("items-center gap-2"):
-            ui.icon("directions_bike", size="md")
-            ui.label("Smart Trainer").classes("text-lg font-bold")
-            ui.label(f"· {title}").classes("opacity-60")
+    apply_theme()
+    with ui.header().classes("app-header items-center justify-between px-6 py-2"):
+        with ui.row().classes("items-center gap-3"):
+            ui.icon("directions_bike", size="sm").classes("text-primary")
+            ui.label("Smart Trainer").classes("brand")
             if S.fake:
-                ui.badge("DEMO: simulated devices", color="orange")
+                ui.badge("Demo", color="warning").props("outline").tooltip("Simulated devices")
         with ui.row().classes("gap-1"):
             for label, path in (
                 ("Ride", "/"),
@@ -84,10 +86,11 @@ def frame(title: str) -> None:
                 ("History", "/history"),
                 ("Settings", "/settings"),
             ):
+                active = label == title
                 ui.button(label, on_click=lambda p=path: ui.navigate.to(p)).props(
-                    "flat color=white dense"
-                )
-        chips = ui.row().classes("gap-1")
+                    f"flat dense padding='6px 14px' color={'white' if active else 'grey-5'}"
+                ).classes("nav-btn" + (" active" if active else ""))
+        chips = ui.row().classes("gap-2")
 
     def refresh_chips() -> None:
         """Redraw the device status chips."""
@@ -96,13 +99,16 @@ def frame(title: str) -> None:
         with chips:
             for role in (Role.TRAINER, Role.POWER, Role.HR):
                 dev = e.device_for(role)
-                color = STATE_COLOR[dev.state] if dev else "grey"
+                color = DOT_COLOR[dev.state] if dev else DOT_COLOR[None]
                 tip = (
                     f"{role.value}: {dev.name} ({dev.state})"
                     if dev
                     else f"{role.value}: not paired"
                 )
-                ui.chip(icon=ROLE_ICON[role], color=color).props("dense square").tooltip(tip)
+                with ui.element("div").classes("dev-chip") as chip:
+                    ui.icon(ROLE_ICON[role], size="16px")
+                    ui.element("span").classes("dev-dot").style(f"background: {color}")
+                chip.tooltip(tip)
 
     refresh_chips()
     ui.timer(2.0, refresh_chips)
@@ -116,22 +122,30 @@ def ride_page() -> None:
     frame("Ride")
     ftp = e.settings.ftp
 
-    with ui.column().classes("w-full p-4 gap-3"):
-        warn = ui.label("").classes("text-orange-400 font-semibold")
-        with ui.row().classes("w-full gap-3 no-wrap"):
-            t_power = Tile("Power (3s)", "W", big=True, color="text-yellow-300")
-            t_target = Tile("Target", "W", big=True, color="text-sky-300")
-            t_hr = Tile("Heart rate", "bpm", color="text-rose-400")
-            t_cad = Tile("Cadence", "rpm")
-        with ui.row().classes("w-full gap-3 no-wrap"):
-            t_time = Tile("Elapsed", "")
-            t_step = Tile("Interval left", "")
-            t_speed = Tile("Speed", "km/h")
-            t_bal = Tile("Balance L/R", "")
-        step_label = ui.label("").classes("text-xl")
-        next_label = ui.label("").classes("opacity-70")
+    with ui.column().classes("page"):
+        warn = ui.label("").classes("status-bar")
+        with ui.element("div").classes("metric-grid"):
+            t_power = Tile("Power · 3s", "W", icon="bolt", size="lg", accent="#facc15")
+            t_target = Tile("Target", "W", icon="adjust", size="lg", accent="#4f8cff")
+            t_hr = Tile("Heart rate", "bpm", icon="favorite", size="lg", accent="#f43f5e")
+            t_cad = Tile("Cadence", "rpm", icon="autorenew", size="lg", accent="#a78bfa")
+        with ui.element("div").classes("metric-grid"):
+            t_time = Tile("Elapsed", icon="schedule")
+            t_step = Tile("Interval left", icon="timer")
+            t_speed = Tile("Speed", "km/h", icon="speed")
+            t_bal = Tile("Balance", "L/R", icon="balance")
 
-        holder = ui.column().classes("w-full")
+        with ui.card().classes("w-full panel gap-2") as step_card:
+            with ui.row().classes("w-full items-baseline justify-between no-wrap gap-4"):
+                step_label = ui.label("").classes("step-title")
+                next_label = ui.label("").classes("step-next text-right")
+            step_bar = (
+                ui.linear_progress(value=0, show_value=False)
+                .props("rounded size=6px color=primary instant-feedback")
+                .classes("step-progress")
+            )
+
+        holder = ui.card().classes("w-full p-2")
         chart_ref: dict = {"chart": None, "workout": object()}
 
         def ensure_chart() -> None:
@@ -149,54 +163,57 @@ def ride_page() -> None:
             chart_ref["workout"] = wo
 
         # ---------------------------------------------------------- controls
-        with ui.row().classes("items-center gap-2 w-full"):
+        with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-3 w-full"):
             btn_start = ui.button("Start", icon="play_arrow", on_click=lambda: start()).props(
-                "color=positive size=lg"
+                "color=positive size=lg padding='8px 28px'"
             )
             btn_pause = ui.button("Pause", icon="pause", on_click=lambda: e.toggle_pause()).props(
-                "size=lg"
+                "color=primary size=lg padding='8px 24px'"
             )
-            btn_skip = ui.button("Skip", icon="skip_next", on_click=lambda: e.skip_step())
-            btn_lap = ui.button("Lap", icon="flag", on_click=lambda: e.lap())
-            with ui.row().classes("items-center gap-1") as intensity_box:
-                ui.button(icon="remove", on_click=lambda: e.change_intensity(-0.05)).tooltip(
-                    "Intensity -5%"
-                )
-                intensity = ui.label("100%").classes("text-lg tabular-nums w-14 text-center")
-                ui.button(icon="add", on_click=lambda: e.change_intensity(0.05)).tooltip(
-                    "Intensity +5%"
-                )
+            btn_skip = ui.button("Skip", icon="skip_next", on_click=lambda: e.skip_step()).props(
+                "color=secondary"
+            )
+            btn_lap = ui.button("Lap", icon="flag", on_click=lambda: e.lap()).props(
+                "color=secondary"
+            )
+            with ui.row().classes("items-center gap-1 ml-2") as intensity_box:
+                ui.label("Intensity").classes("field-label mr-1")
+                ui.button(icon="remove", on_click=lambda: e.change_intensity(-0.05)).props(
+                    "color=secondary round dense"
+                ).tooltip("Intensity -5%")
+                intensity = ui.label("100%").classes("control-value")
+                ui.button(icon="add", on_click=lambda: e.change_intensity(0.05)).props(
+                    "color=secondary round dense"
+                ).tooltip("Intensity +5%")
             erg = ui.switch("ERG", value=e.erg_enabled, on_change=lambda ev: e.set_erg(ev.value))
             ui.space()
             btn_finish = ui.button("Finish", icon="stop", on_click=lambda: confirm_finish()).props(
-                "color=negative size=lg"
+                "color=negative outline size=lg padding='8px 24px'"
             )
 
-        with (
-            ui.card().classes("w-full") as manual_card,
-            ui.row().classes("items-center gap-4 w-full"),
-        ):
-            ui.label("Manual control").classes("font-semibold")
-            mode = ui.toggle(
-                {"resistance": "Resistance", "slope": "Slope", "erg": "Fixed ERG"},
-                value=e.controller.mode.value if e.runner is None else "resistance",
-                on_change=lambda ev: set_manual_mode(ev.value),
-            )
-            slider = ui.slider(
-                min=0,
-                max=100,
-                step=1,
-                value=e.controller.resistance_pct,
-                on_change=lambda ev: set_manual_value(ev.value),
-            ).classes("grow")
-            slider_label = ui.label("").classes("w-24 tabular-nums")
-        with ui.row().classes("items-center gap-4"):
-            ui.label("Power source")
-            ui.toggle(
-                {"pedals": "Pedals", "trainer": "Trainer"},
-                value=e.settings.power_source,
-                on_change=lambda ev: e.set_power_source(ev.value),
-            )
+        with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-6 w-full"):
+            with ui.row().classes("items-center gap-4 grow no-wrap") as manual_box:
+                ui.label("Manual").classes("field-label")
+                mode = ui.toggle(
+                    {"resistance": "Resistance", "slope": "Slope", "erg": "Fixed ERG"},
+                    value=e.controller.mode.value if e.runner is None else "resistance",
+                    on_change=lambda ev: set_manual_mode(ev.value),
+                ).classes("shrink-0")
+                slider = ui.slider(
+                    min=0,
+                    max=100,
+                    step=1,
+                    value=e.controller.resistance_pct,
+                    on_change=lambda ev: set_manual_value(ev.value),
+                ).classes("grow min-w-[120px]")
+                slider_label = ui.label("").classes("control-value w-24")
+            with ui.row().classes("items-center gap-3 shrink-0"):
+                ui.label("Power source").classes("field-label")
+                ui.toggle(
+                    {"pedals": "Pedals", "trainer": "Trainer"},
+                    value=e.settings.power_source,
+                    on_change=lambda ev: e.set_power_source(ev.value),
+                )
 
     def set_manual_mode(m: str) -> None:
         """Switch the manual control mode and adapt the slider range.
@@ -329,49 +346,60 @@ def ride_page() -> None:
             and snap.power_source != e.selector.trainer_id
             else "trainer"
         )
-        sub = f"{src}" + (
-            f" · trainer {fmt(snap.trainer_power)}"
+        sub = f"from {src}" + (
+            f" · trainer {fmt(snap.trainer_power)} W"
             if snap.pedal_power is not None and snap.trainer_power is not None
             else ""
         )
+        zones = e.settings.power_zones
         t_power.set(fmt(p3), sub)
-        t_power.set_color(zone_color(p3, ftp, e.settings.power_zones) if p3 is not None else None)
+        t_power.set_zone(*power_zone(p3, ftp, zones))
         target = e.current_target()
         cmd = e.controller.last_command
         t_target.set(
             fmt(target) if target is not None else "--",
-            f"trainer cmd {cmd[1]:.0f} W"
+            f"trainer command {cmd[1]:.0f} W"
             if cmd and cmd[0] == Mode.ERG
-            else e.controller.mode.value,
+            else f"{e.controller.mode.value} mode",
         )
-        t_hr.set(fmt(snap.hr))
-        t_hr.set_color(hr_zone_color(snap.hr, e.settings.hr_zones))
-        t_cad.set(fmt(snap.cadence))
+        t_target.set_zone(*power_zone(target, ftp, zones))
+        max_hr = e.settings.max_hr
+        t_hr.set(fmt(snap.hr), f"{snap.hr / max_hr:.0%} of max" if snap.hr and max_hr else "")
+        t_hr.set_zone(*hr_zone(snap.hr, e.settings.hr_zones))
+        r = e.runner
+        st = r.current()[1] if r else None
+        t_cad.set(fmt(snap.cadence), f"target {st.cadence} rpm" if st and st.cadence else "")
         t_speed.set(fmt(snap.speed_kmh, 1))
         t_bal.set(
             f"{snap.balance_left:.0f}/{100 - snap.balance_left:.0f}" if snap.balance_left else "--"
         )
-        r = e.runner
         if r:
             i, st, into, left = r.current()
             t_time.set(fmt_time(r.elapsed), f"of {fmt_time(r.workout.duration_s)}")
-            t_step.set(fmt_time(left), f"step {i + 1}/{len(r.workout.steps)}")
-            label = st.text or ("Free ride" if st.free_ride else "")
-            cad = f" · {st.cadence} rpm" if st.cadence else ""
-            step_label.set_text(f"{label}{cad}")
+            t_step.set(fmt_time(left), f"step {i + 1} of {len(r.workout.steps)}")
+            label = st.text or ("Free ride" if st.free_ride else f"Interval {i + 1}")
+            step_label.set_text(label)
             nxt = r.next_step()
             nt = nxt.target_w(0, r.ftp) if nxt else None
             next_label.set_text(
-                f"Next: {nxt.text or ''} {fmt(nt)} W for {fmt_time(nxt.duration_s)}"
+                f"Next · {nxt.text + ' · ' if nxt.text else ''}{fmt(nt)} W"
+                f" for {fmt_time(nxt.duration_s)}"
                 if nxt
                 else "Last interval"
             )
+            step_bar.set_value(min(1.0, into / st.duration_s) if st.duration_s else 0)
             intensity.set_text(f"{r.intensity * 100:.0f}%")
+            step_card.set_visibility(True)
         else:
             t_time.set(fmt_time(e.ride_seconds if riding else 0), "free ride" if riding else "")
             t_step.set("--")
-            step_label.set_text(S.selected.name if (S.selected and not riding) else "")
-            next_label.set_text("")
+            sel = None if riding else S.selected
+            step_label.set_text(sel.name if sel else "")
+            next_label.set_text(
+                f"{fmt_time(sel.duration_s)} · {len(sel.steps)} steps" if sel else ""
+            )
+            step_bar.set_value(0)
+            step_card.set_visibility(sel is not None)
         status = []
         if e.manual_pause:
             status.append("PAUSED")
@@ -381,6 +409,7 @@ def ride_page() -> None:
         if e.device_for(Role.TRAINER) and not e.trainer_connected():
             status.append("Trainer disconnected: reconnecting…")
         warn.set_text(" · ".join(status))
+        warn.set_visibility(bool(status))
         btn_start.set_visibility(not riding)
         for b in (btn_pause, btn_finish, btn_lap):
             b.set_visibility(riding)
@@ -388,7 +417,7 @@ def ride_page() -> None:
         btn_pause.set_text("Resume" if e.manual_pause else "Pause")
         erg.set_visibility(r is not None)
         intensity_box.set_visibility(r is not None)
-        manual_card.set_visibility(not (r and e.erg_enabled))
+        manual_box.set_visibility(not (r and e.erg_enabled))
         c = e.controller
         unit = {"resistance": "%", "slope": "% grade", "erg": " W"}[c.mode.value]
         val = {"resistance": c.resistance_pct, "slope": c.slope_pct, "erg": c.erg_target}[
@@ -449,19 +478,29 @@ def workouts_page() -> None:
     """Workouts page: planned intervals.icu workouts, built-ins and .zwo import."""
     e = S.engine
     frame("Workouts")
-    with ui.column().classes("w-full p-4 gap-4"):
+    with ui.column().classes("page"):
         if S.selected:
-            ui.label(f"Selected: {S.selected.name}").classes("text-lg text-positive")
-        with ui.row().classes("items-center gap-2"):
-            ui.label("intervals.icu").classes("text-xl font-bold")
-            ui.button("Refresh", icon="refresh", on_click=lambda: load())
-            ui.button("Free ride", icon="all_inclusive", on_click=lambda: choose(None))
-            ui.upload(
-                label="Import .zwo", auto_upload=True, on_upload=lambda ev: import_zwo(ev)
-            ).props("accept=.zwo flat dense").classes("w-56")
-        status = ui.label("")
+            with ui.row().classes("items-center gap-2"):
+                ui.icon("check_circle", color="positive")
+                ui.label(f"Selected: {S.selected.name}").classes("list-title")
+        with ui.row().classes("items-center gap-2 w-full"):
+            ui.label("Planned on intervals.icu").classes("section-title")
+            ui.space()
+            ui.button("Refresh", icon="refresh", on_click=lambda: load()).props("color=secondary")
+            ui.button("Free ride", icon="all_inclusive", on_click=lambda: choose(None)).props(
+                "color=secondary"
+            )
+            uploader = (
+                ui.upload(auto_upload=True, on_upload=lambda ev: import_zwo(ev))
+                .props("accept=.zwo")
+                .classes("hidden")
+            )
+            ui.button(
+                "Import .zwo", icon="upload_file", on_click=lambda: uploader.run_method("pickFiles")
+            ).props("color=secondary")
+        status = ui.label("").classes("hint")
         listing = ui.column().classes("w-full gap-3")
-        ui.label("Built-in workouts").classes("text-xl font-bold mt-4")
+        ui.label("Built-in workouts").classes("section-title mt-4")
         builtin = ui.column().classes("w-full gap-3")
 
     def choose(wo: Workout | None) -> None:
@@ -496,13 +535,13 @@ def workouts_page() -> None:
             where (ui.element | None): Container to render into; defaults to the
                 intervals.icu listing.
         """
-        with where or listing, ui.card().classes("w-full"):
+        with where or listing, ui.card().classes("w-full panel gap-2"):
             with ui.row().classes("items-center w-full"):
                 with ui.column().classes("gap-0"):
-                    ui.label(wo.name).classes("text-lg font-semibold")
+                    ui.label(wo.name).classes("list-title")
                     ui.label(
                         f"{subtitle} · {fmt_time(wo.duration_s)} · {len(wo.steps)} steps"
-                    ).classes("opacity-70")
+                    ).classes("list-sub")
                 ui.space()
                 ui.button("Ride this", icon="play_arrow", on_click=lambda w=wo: choose(w)).props(
                     "color=positive"
@@ -574,16 +613,17 @@ def devices_page() -> None:
     """Devices page: paired devices and BLE scanning/pairing."""
     e = S.engine
     frame("Devices")
-    with ui.column().classes("w-full p-4 gap-4"):
-        ui.label("Paired devices").classes("text-xl font-bold")
+    with ui.column().classes("page page-narrow"):
+        ui.label("Paired devices").classes("section-title")
         paired = ui.column().classes("w-full gap-2")
-        with ui.row().classes("items-center gap-2"):
-            ui.label("Find devices").classes("text-xl font-bold")
+        with ui.row().classes("items-center gap-2 w-full mt-4"):
+            ui.label("Find devices").classes("section-title")
+            ui.space()
             scan_btn = ui.button("Scan", icon="bluetooth_searching", on_click=lambda: do_scan())
         ui.label(
             "Wake devices up first: pedal to wake the trainer and the Assioma pedals, "
             "and put on the HRM strap."
-        ).classes("opacity-70")
+        ).classes("hint")
         found = ui.column().classes("w-full gap-2")
 
     def render_paired() -> None:
@@ -594,16 +634,16 @@ def devices_page() -> None:
             roles_by_dev.setdefault(did, []).append(role.value)
         with paired:
             if not e.devices:
-                ui.label("No devices yet: scan below.").classes("opacity-70")
+                ui.label("No devices yet: scan below.").classes("hint")
             for did, dev in e.devices.items():
-                with ui.card().classes("w-full"), ui.row().classes("items-center w-full"):
-                    ui.icon("circle", color=STATE_COLOR[dev.state]).classes("text-xs")
+                with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
+                    ui.element("span").classes("dev-dot").style(
+                        f"background: {DOT_COLOR[dev.state]}"
+                    ).tooltip(str(dev.state))
                     with ui.column().classes("gap-0"):
-                        ui.label(dev.name).classes("font-semibold")
+                        ui.label(dev.name).classes("list-title")
                         used_for = ", ".join(sorted(roles_by_dev.get(did, []))) or "-"
-                        ui.label(f"{dev.DRIVER} · used for: {used_for}").classes(
-                            "text-sm opacity-70"
-                        )
+                        ui.label(f"{dev.DRIVER} · used for {used_for}").classes("list-sub")
                     ui.space()
                     if isinstance(dev, Calibratable):
                         blocker = e.calibration_blocker(did)
@@ -646,13 +686,13 @@ def devices_page() -> None:
             scan_btn.props(remove="loading")
         with found:
             if not results:
-                ui.label("Nothing found.").classes("opacity-70")
+                ui.label("Nothing found.").classes("hint")
             for r in results:
-                with ui.card().classes("w-full"), ui.row().classes("items-center w-full"):
+                with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
                     with ui.column().classes("gap-0"):
-                        ui.label(r.name).classes("font-semibold")
+                        ui.label(r.name).classes("list-title")
                         ui.label(f"{', '.join(sorted(r.roles))} · RSSI {r.rssi}").classes(
-                            "text-sm opacity-70"
+                            "list-sub"
                         )
                     ui.space()
                     driver = DRIVERS[r.drivers[0]]
@@ -667,7 +707,7 @@ def devices_page() -> None:
                                 label,
                                 icon=ROLE_ICON[role],
                                 on_click=lambda r=r, role=role: use(r, role),
-                            )
+                            ).props("color=secondary")
 
     # Created at page level: ``render_paired`` clears the device cards every 2 s.
     cal_dialog = ui.dialog().props("persistent")
@@ -801,8 +841,9 @@ def history_page() -> None:
     """History page: recorded sessions and manual upload."""
     e = S.engine
     frame("History")
-    with ui.column().classes("w-full p-4 gap-2"):
-        ui.label(f"Sessions are stored in {e.sessions}").classes("text-sm opacity-60")
+    with ui.column().classes("page page-narrow"):
+        ui.label("Sessions").classes("section-title")
+        ui.label(f"Stored in {e.sessions}").classes("hint")
         listing = ui.column().classes("w-full gap-2")
 
     def render() -> None:
@@ -810,7 +851,7 @@ def history_page() -> None:
         listing.clear()
         with listing:
             for s in list_sessions(e.sessions):
-                with ui.card().classes("w-full"), ui.row().classes("items-center w-full"):
+                with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
                     icon, color = {
                         "uploaded": ("cloud_done", "positive"),
                         "finished": ("save", "primary"),
@@ -818,11 +859,11 @@ def history_page() -> None:
                     }.get(s.status, ("help", "grey"))
                     ui.icon(icon, color=color, size="sm")
                     with ui.column().classes("gap-0"):
-                        ui.label(s.name).classes("font-semibold")
+                        ui.label(s.name).classes("list-title")
                         extra = f" · upload error: {s.upload_error}" if s.upload_error else ""
                         when = f"{s.started:%a %d %b %Y %H:%M}"
                         ui.label(f"{when} · {fmt_time(s.elapsed_s)} · {s.status}{extra}").classes(
-                            "text-sm opacity-70"
+                            "list-sub"
                         )
                     ui.space()
                     fit = s.path.with_suffix(".fit")
@@ -846,7 +887,9 @@ def history_page() -> None:
                             )
                             render()
 
-                        ui.button("Upload", icon="cloud_upload", on_click=up)
+                        ui.button("Upload", icon="cloud_upload", on_click=up).props(
+                            "color=secondary"
+                        )
 
     render()
 
@@ -892,13 +935,18 @@ def settings_page() -> None:
     e = S.engine
     st = e.settings
     frame("Settings")
-    with ui.column().classes("p-4 gap-3 w-full max-w-xl [&_.q-field]:w-full"):
-        ui.label("Rider profile").classes("text-lg font-bold")
+    with (
+        ui.column().classes("page page-narrow [&_.q-field]:w-full"),
+        ui.card().classes("w-full panel gap-3"),
+    ):
+        ui.label("Rider profile").classes("section-title")
         sync = ui.switch("Sync FTP, zones and weight from intervals.icu", value=st.sync_profile)
         ftp = ui.number("FTP (W)", value=st.ftp, min=50, max=600, step=1)
         weight = ui.number("Weight (kg)", value=st.weight_kg, min=30, max=200, step=0.5)
-        summary = ui.label("").classes("text-sm opacity-70 whitespace-pre-line")
-        sync_btn = ui.button("Sync now", icon="sync", on_click=lambda: sync_now())
+        summary = ui.label("").classes("hint whitespace-pre-line")
+        sync_btn = ui.button("Sync now", icon="sync", on_click=lambda: sync_now()).props(
+            "color=secondary"
+        )
 
         def refresh_profile() -> None:
             """Show the current profile and lock the fields while syncing is on."""
@@ -938,11 +986,11 @@ def settings_page() -> None:
         sync.on_value_change(toggle_sync)
         refresh_profile()
         ui.separator()
-        ui.label("intervals.icu").classes("text-lg font-bold")
+        ui.label("intervals.icu").classes("section-title mt-2")
         ui.label(
             "Find your API key at intervals.icu → Settings → Developer Settings. "
             "It is stored in the macOS Keychain."
-        ).classes("text-sm opacity-70")
+        ).classes("hint")
         key = ui.input(
             "API key",
             password=True,
@@ -954,7 +1002,7 @@ def settings_page() -> None:
         )
         auto = ui.switch("Upload automatically after each ride", value=st.auto_upload)
         ui.separator()
-        ui.label("Power matching (pedals as power source)").classes("text-lg font-bold")
+        ui.label("Power matching (pedals as power source)").classes("section-title mt-2")
         max_off = ui.number("Max correction (W)", value=st.power_match.max_offset_w, min=0, max=150)
         settle = ui.number(
             "Settle time after target change (s)", value=st.power_match.settle_s, min=0, max=30
@@ -999,6 +1047,8 @@ def settings_page() -> None:
             finally:
                 await c.aclose()
 
-        with ui.row():
+        with ui.row().classes("mt-2"):
             ui.button("Save", icon="save", on_click=save).props("color=positive")
-            ui.button("Test connection", icon="wifi_tethering", on_click=test_key)
+            ui.button("Test connection", icon="wifi_tethering", on_click=test_key).props(
+                "color=secondary"
+            )
