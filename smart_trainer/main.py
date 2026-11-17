@@ -1,11 +1,12 @@
-"""Entry point: `uv run smart-trainer [--fake] [--lan] [--port 8080]`."""
+"""Entry point: `uv run smart-trainer [--fake] [--lan] [--native] [--port 8080]`."""
 
 from __future__ import annotations
 
 import argparse
 import logging
+import sys
 
-from nicegui import app, ui
+from nicegui import app, native, ui
 
 from smart_trainer.ble import fake
 from smart_trainer.ble.scanner import make_device
@@ -59,8 +60,17 @@ def run() -> None:
         action="store_true",
         help="listen on the local network (open the ride screen on an iPad/phone)",
     )
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument(
+        "--port", type=int, default=None, help="default 8080; a free port if native"
+    )
     parser.add_argument("--no-browser", action="store_true")
+    frozen = getattr(sys, "frozen", False)  # running from the packaged macOS .app
+    parser.add_argument(
+        "--native",
+        action=argparse.BooleanOptionalAction,
+        default=frozen,
+        help="open in a desktop window instead of the browser (needs the 'app' extra)",
+    )
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -68,13 +78,20 @@ def run() -> None:
 
     app.on_startup(lambda: _startup(args.fake))
     app.on_shutdown(lambda: S.engine.shutdown())
+    port = args.port
+    if port is None:
+        # A native window doesn't need a stable URL, so avoid clashing with other apps;
+        # with --lan the iPad needs a predictable address.
+        port = 8080 if args.lan or not args.native else native.find_open_port()
     ui.run(
         title="Smart Trainer",
         dark=True,
         reload=False,
-        port=args.port,
+        port=port,
         host="0.0.0.0" if args.lan else "127.0.0.1",
         show=not args.no_browser,
+        native=args.native,
+        window_size=(1280, 860) if args.native else None,
         favicon="🚴",
     )
 
