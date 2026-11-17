@@ -8,23 +8,15 @@ Indoor cycling app for macOS, written in Python. It:
 
 ## Install
 
-The app runs on your Mac because it talks to your Bluetooth devices. There are two ways to install it:
+Download the Mac app (Apple Silicon) from
+[Releases](https://github.com/mighelone/smart-trainer/releases), or install it from the command line:
 
-- **Mac app (Apple Silicon only):** download `SmartTrainer-<version>-macos-arm64.dmg` from
-  [Releases](https://github.com/mighelone/smart-trainer/releases),
-  drag **Smart Trainer** to Applications and open it. It opens in its own window; macOS asks for
-  Bluetooth permission on the first scan.
+```bash
+uv tool install git+https://github.com/mighelone/smart-trainer
+```
 
-  The app isn't notarized by Apple, so the first launch is blocked: click **Done**, then go to
-  **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. Or run
-  `xattr -dr com.apple.quarantine "/Applications/Smart Trainer.app"` once.
-  macOS may ask for Bluetooth permission again after an update.
-- **Command line (with [uv](https://docs.astral.sh/uv/)):**
-  ```bash
-  uv tool install git+https://github.com/mighelone/smart-trainer             # browser UI
-  uv tool install 'smart-trainer[app] @ git+https://github.com/mighelone/smart-trainer'  # + desktop window (--native)
-  ```
-  Bluetooth permission is then granted to your terminal app.
+The Mac app isn't notarized by Apple, so macOS blocks its first launch. See **[INSTALL.md](INSTALL.md)**
+for how to open it, Bluetooth permission, updating, uninstalling and troubleshooting.
 
 ### Releasing
 Bump `version` in `pyproject.toml`, commit, then push a tag `vX.Y.Z` (`vX.Y.Zrc1` for a
