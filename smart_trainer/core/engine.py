@@ -31,6 +31,8 @@ AUTO_PAUSE_POWER = 25
 
 
 class RideState(StrEnum):
+    """Lifecycle state of a ride."""
+
     IDLE = "idle"
     RIDING = "riding"
     FINISHING = "finishing"
@@ -38,6 +40,16 @@ class RideState(StrEnum):
 
 @dataclass
 class HistoryPoint:
+    """One point of the live ride chart.
+
+    Attributes:
+        t (float): Active seconds since ride start.
+        power (float | None): Power in watts.
+        hr (int | None): Heart rate in bpm.
+        cadence (float | None): Cadence in rpm.
+        target (float | None): Workout target power in watts.
+    """
+
     t: float  # seconds since ride start (wall clock)
     power: float | None
     hr: int | None
@@ -46,9 +58,39 @@ class HistoryPoint:
 
 
 class Engine:
+    """Application core tying devices, control, workout and recording together.
+
+    Attributes:
+        settings (Settings): User settings.
+        sessions (Path): Directory where sessions are recorded.
+        tick_s (float): Loop interval in seconds.
+        devices (dict[str, Device]): Active devices by id.
+        selector (SourceSelector): Resolves readings into snapshots.
+        controller (TrainerController): Trainer control logic.
+        snapshot (Snapshot): Latest effective metrics.
+        state (RideState): Current ride state.
+        runner (WorkoutRunner | None): Workout runner, if riding a workout.
+        recorder (Recorder | None): Session recorder while riding.
+        manual_pause (bool): Whether the rider paused manually.
+        auto_paused (bool): Whether the ride is auto-paused (not pedalling).
+        erg_enabled (bool): Whether workout targets drive ERG mode.
+        ride_started_at (float | None): Unix time the ride started.
+        ride_seconds (float): Recorded seconds, excluding pauses.
+        history (deque[HistoryPoint]): Points for the live chart.
+        messages (deque[str]): User-facing status messages.
+        last_fit (Path | None): Path of the last exported FIT file.
+    """
+
     def __init__(
         self, settings: Settings, sessions: Path | None = None, tick_s: float = 1.0
     ) -> None:
+        """Initialize the engine.
+
+        Args:
+            settings (Settings): User settings.
+            sessions (Path | None): Session directory; defaults to :func:`sessions_dir`.
+            tick_s (float): Loop interval in seconds.
+        """
         self.settings = settings
         self.sessions = sessions or sessions_dir()
         self.tick_s = tick_s
@@ -73,6 +115,12 @@ class Engine:
 
     # ------------------------------------------------------------------ devices
     def add_device(self, dev: Device, roles: list[Role] | None = None) -> None:
+        """Add (or replace) a device, assign it roles and start it.
+
+        Args:
+            dev (Device): The device to add.
+            roles (list[Role] | None): Roles to assign to the device.
+        """
         old = self.devices.get(dev.id)
         if old is not None:
             asyncio.ensure_future(old.stop())
@@ -84,6 +132,11 @@ class Engine:
         dev.start()
 
     async def remove_device(self, device_id: str) -> None:
+        """Stop and forget a device, removing its pairing and role assignments.
+
+        Args:
+            device_id (str): Id of the device to remove.
+        """
         dev = self.devices.pop(device_id, None)
         if dev:
             await dev.stop()
@@ -94,6 +147,12 @@ class Engine:
         self._apply_assignment()
 
     def pair(self, dev: Device, roles: list[Role]) -> None:
+        """Pair a device: persist it in the settings and add it to the engine.
+
+        Args:
+            dev (Device): The device to pair.
+            roles (list[Role]): Roles to assign to the device.
+        """
         self.settings.devices[dev.id] = PairedDevice(
             address=dev.address, name=dev.name, driver=dev.DRIVER
         )
@@ -101,6 +160,7 @@ class Engine:
         self.settings.save()
 
     def _apply_assignment(self) -> None:
+        """Push the role assignment from the settings to the selector and controller."""
         ra = {Role(k): v for k, v in self.settings.role_assignment.items()}
         trainer_id = ra.get(Role.TRAINER)
         if self.settings.power_source == "trainer" and trainer_id:
@@ -115,24 +175,44 @@ class Engine:
         self.controller.force_resend()
 
     def set_power_source(self, source: str) -> None:
+        """Choose the preferred power source and persist it.
+
+        Args:
+            source (str): ``"pedals"`` or ``"trainer"``.
+        """
         self.settings.power_source = source
         self.settings.save()
         self._apply_assignment()
 
     def device_for(self, role: Role) -> Device | None:
+        """Get the device assigned to a role.
+
+        Args:
+            role (Role): The role to look up.
+
+        Returns:
+            Device | None: The assigned device, or ``None``.
+        """
         did = self.selector.assignment.get(role)
         return self.devices.get(did) if did else None
 
     def trainer_connected(self) -> bool:
+        """Whether the assigned trainer is connected.
+
+        Returns:
+            bool: ``True`` if a trainer is assigned and connected.
+        """
         device = self.device_for(Role.TRAINER)
         return bool(device and device.state == ConnState.CONNECTED)
 
     # --------------------------------------------------------------------- loop
     def start(self) -> None:
+        """Start the engine loop if not already running."""
         if self._task is None:
             self._task = asyncio.create_task(self._loop(), name="engine")
 
     async def shutdown(self) -> None:
+        """Stop the loop and all devices, leaving any active session recoverable."""
         if self._task:
             self._task.cancel()
         for d in list(self.devices.values()):
@@ -141,6 +221,7 @@ class Engine:
             self.recorder.close()  # session stays 'active' -> recoverable
 
     async def _loop(self) -> None:
+        """Run :meth:`tick` every ``tick_s`` seconds until cancelled."""
         next_t = time.monotonic()
         while True:
             try:
@@ -151,6 +232,11 @@ class Engine:
             await asyncio.sleep(max(0.0, next_t - time.monotonic()))
 
     async def tick(self, now_wall: float | None = None) -> None:
+        """Run one engine step: snapshot, workout progress, recording and control.
+
+        Args:
+            now_wall (float | None): Current unix time; defaults to ``time.time()``.
+        """
         now_wall = now_wall or time.time()
         snap = self.selector.snapshot()
         self.snapshot = snap
@@ -197,6 +283,11 @@ class Engine:
         )
 
     def _update_control_mode(self, target: float | None) -> None:
+        """Switch between ERG and resistance mode according to the workout target.
+
+        Args:
+            target (float | None): Current workout target in watts, if any.
+        """
         if self.runner is None:
             return
         if target is not None and self.erg_enabled:
@@ -207,9 +298,19 @@ class Engine:
 
     # ------------------------------------------------------------------- riding
     def current_target(self) -> float | None:
+        """Current workout target power.
+
+        Returns:
+            float | None: Target in watts, or ``None`` if no workout target.
+        """
         return self.runner.target_w() if self.runner else None
 
     def start_ride(self, workout: Workout | None) -> None:
+        """Start recording a new ride.
+
+        Args:
+            workout (Workout | None): Workout to ride, or ``None`` for a free ride.
+        """
         name = workout.name if workout else f"Free ride {datetime.now():%d %b}"
         self.recorder = Recorder.create(self.sessions, name, self.settings.ftp, workout)
         self.runner = (
@@ -218,7 +319,11 @@ class Engine:
         self._begin()
 
     def resume_session(self, info: SessionInfo) -> None:
-        """Continue a crashed session: same file, workout resumes at the saved elapsed time."""
+        """Continue a crashed session: same file, workout resumes at the saved elapsed time.
+
+        Args:
+            info (SessionInfo): The unfinished session to resume.
+        """
         self.recorder = Recorder.open(info.path)
         self.runner = (
             WorkoutRunner(info.workout, info.ftp, info.elapsed_s)
@@ -237,6 +342,11 @@ class Engine:
         self._begin(resumed=True)
 
     def _begin(self, resumed: bool = False) -> None:
+        """Enter the riding state.
+
+        Args:
+            resumed (bool): Whether an existing session is being resumed.
+        """
         self.state = RideState.RIDING
         self.manual_pause = False
         self.ride_started_at = time.time()
@@ -249,27 +359,48 @@ class Engine:
         self.messages.append("Session resumed" if resumed else "Ride started")
 
     def toggle_pause(self) -> None:
+        """Toggle the manual pause."""
         self.manual_pause = not self.manual_pause
 
     def skip_step(self) -> None:
+        """Skip to the next workout step."""
         if self.runner:
             self.runner.skip()
 
     def lap(self) -> None:
+        """Start a new lap in the recording."""
         if self.recorder:
             self.recorder.new_lap()
 
     def change_intensity(self, delta: float) -> None:
+        """Adjust the workout intensity multiplier (clamped to 0.5-1.5).
+
+        Args:
+            delta (float): Amount to add to the intensity (e.g. ``0.05``).
+        """
         if self.runner:
             self.runner.intensity = max(0.5, min(1.5, round(self.runner.intensity + delta, 2)))
 
     def set_erg(self, enabled: bool) -> None:
+        """Enable or disable ERG mode for workout targets.
+
+        Args:
+            enabled (bool): Whether workout targets should drive ERG mode.
+        """
         self.erg_enabled = enabled
         if not enabled and self.controller.mode == Mode.ERG:
             self.controller.set_mode(Mode.RESISTANCE)
 
     async def finish(self, upload: bool | None = None) -> Path | None:
-        """Stop recording, export FIT, and optionally upload. Returns the FIT path."""
+        """Stop recording, export FIT, and optionally upload.
+
+        Args:
+            upload (bool | None): Whether to upload; defaults to the
+                ``auto_upload`` setting.
+
+        Returns:
+            Path | None: The FIT file path, or ``None`` if nothing was recorded.
+        """
         if not self.recorder:
             return None
         self.state = RideState.FINISHING
@@ -283,6 +414,16 @@ class Engine:
         return fit
 
     async def finalize(self, rec: Recorder, upload: bool | None = None) -> Path | None:
+        """Export a session to FIT, mark it finished and optionally upload it.
+
+        Args:
+            rec (Recorder): The session recorder.
+            upload (bool | None): Whether to upload; defaults to the
+                ``auto_upload`` setting.
+
+        Returns:
+            Path | None: The FIT file path, or ``None`` if the session has no samples.
+        """
         info = rec.info()
         fit = None
         if info.n_samples:
@@ -293,6 +434,16 @@ class Engine:
         return fit
 
     async def upload(self, rec: Recorder, fit: Path, info: SessionInfo | None = None) -> bool:
+        """Upload a FIT file to intervals.icu and record the outcome in the session.
+
+        Args:
+            rec (Recorder): The session recorder.
+            fit (Path): Path of the FIT file to upload.
+            info (SessionInfo | None): Session info; read from ``rec`` if omitted.
+
+        Returns:
+            bool: ``True`` if the upload succeeded.
+        """
         info = info or rec.info()
         if self.settings._readonly:
             self.messages.append("Demo mode: uploads are disabled")
@@ -319,6 +470,16 @@ class Engine:
             await client.aclose()
 
     async def finish_crashed(self, info: SessionInfo, upload: bool | None = None) -> Path | None:
+        """Finalize a crashed session without resuming it.
+
+        Args:
+            info (SessionInfo): The unfinished session.
+            upload (bool | None): Whether to upload; defaults to the
+                ``auto_upload`` setting.
+
+        Returns:
+            Path | None: The FIT file path, or ``None`` if the session has no samples.
+        """
         rec = Recorder.open(info.path)
         try:
             return await self.finalize(rec, upload)
@@ -326,11 +487,20 @@ class Engine:
             rec.close()
 
     def unfinished_sessions(self) -> list[SessionInfo]:
+        """List crashed sessions, excluding the one currently recording.
+
+        Returns:
+            list[SessionInfo]: Sessions still marked ``active``.
+        """
         current = self.recorder.path if self.recorder else None
         return [s for s in find_unfinished(self.sessions) if s.path != current]
 
     def discard(self, info: SessionInfo) -> None:
-        """Move a session out of the way (kept in sessions/discarded, never deleted)."""
+        """Move a session out of the way (kept in sessions/discarded, never deleted).
+
+        Args:
+            info (SessionInfo): The session to discard.
+        """
         dest = self.sessions / "discarded"
         dest.mkdir(exist_ok=True)
         for suffix in ("", "-wal", "-shm"):

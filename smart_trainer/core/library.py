@@ -4,6 +4,11 @@ from smart_trainer.core.workout import Step, Workout
 
 
 def builtin_workouts() -> list[Workout]:
+    """Build the list of built-in workouts.
+
+    Returns:
+        list[Workout]: Sweet spot, VO2max and a short test ramp workout.
+    """
     ss = [Step(600, 0.45, 0.75, text="Warmup")]
     for i in range(3):
         ss += [

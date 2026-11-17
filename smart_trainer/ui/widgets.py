@@ -8,6 +8,14 @@ from smart_trainer.core.workout import Workout, WorkoutRunner
 
 
 def fmt_time(seconds: float | None) -> str:
+    """Format a duration as ``MM:SS`` or ``H:MM:SS``.
+
+    Args:
+        seconds (float | None): Duration in seconds.
+
+    Returns:
+        str: The formatted duration, or ``"--:--"`` if ``None``.
+    """
     if seconds is None:
         return "--:--"
     s = int(max(0, seconds))
@@ -17,15 +25,38 @@ def fmt_time(seconds: float | None) -> str:
 
 
 def fmt(v, digits: int = 0, unit: str = "") -> str:
+    """Format a number with a fixed number of decimals and an optional unit.
+
+    Args:
+        v (float | int | None): Value to format.
+        digits (int): Number of decimal places.
+        unit (str): Unit suffix appended to the value.
+
+    Returns:
+        str: The formatted value, or ``"--"`` if ``None``.
+    """
     if v is None:
         return "--"
     return f"{v:.{digits}f}{unit}"
 
 
 class Tile:
-    """A big metric tile: label, value, unit, optional sub-line."""
+    """A big metric tile: label, value, unit, optional sub-line.
+
+    Attributes:
+        value (ui.label): Label showing the main value.
+        sub (ui.label): Label showing the secondary line.
+    """
 
     def __init__(self, label: str, unit: str = "", big: bool = False, color: str = "") -> None:
+        """Create the tile in the current UI context.
+
+        Args:
+            label (str): Metric name shown above the value.
+            unit (str): Unit shown next to the value.
+            big (bool): Use a larger font for the value.
+            color (str): Tailwind classes applied to the value (e.g. a text color).
+        """
         size = "text-7xl" if big else "text-5xl"
         with ui.card().classes("items-center min-w-[150px] grow p-3 gap-0"):
             ui.label(label).classes("text-xs uppercase tracking-widest opacity-60")
@@ -35,11 +66,26 @@ class Tile:
             self.sub = ui.label("").classes("text-sm opacity-70 tabular-nums")
 
     def set(self, value: str, sub: str = "") -> None:
+        """Update the displayed value and sub-line.
+
+        Args:
+            value (str): Main value text.
+            sub (str): Secondary line text.
+        """
         self.value.set_text(value)
         self.sub.set_text(sub)
 
 
 def zone_color(watts: float | None, ftp: int) -> str:
+    """Color for a power value according to its Coggan power zone.
+
+    Args:
+        watts (float | None): Power in watts.
+        ftp (int): Rider's FTP in watts.
+
+    Returns:
+        str: Hex color string (grey if ``watts`` is ``None``).
+    """
     if watts is None:
         return "#64748b"
     r = watts / ftp
@@ -57,6 +103,17 @@ def zone_color(watts: float | None, ftp: int) -> str:
 
 
 def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live: bool = True):
+    """Create an ECharts chart of the workout target, optionally with live series.
+
+    Args:
+        workout (Workout | None): Workout whose target profile is drawn.
+        ftp (int): Rider's FTP in watts, used to convert targets to watts.
+        height (str): Tailwind height class for the chart.
+        live (bool): Include the live power and heart-rate series.
+
+    Returns:
+        ui.echart: The chart element.
+    """
     total = workout.duration_s if workout else 600
     series = [
         {

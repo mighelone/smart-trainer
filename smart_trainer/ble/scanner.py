@@ -8,7 +8,7 @@ from bleak import BleakScanner
 
 # Import driver modules so they register themselves.
 from smart_trainer.ble import cycling_power, ftms, heart_rate, uuids  # noqa: F401
-from smart_trainer.ble.device import DRIVERS, Device, drivers_for_services
+from smart_trainer.ble.device import DRIVERS, Device, DriverId, drivers_for_services
 
 FITNESS_SERVICES = [
     uuids.FTMS_SERVICE,
@@ -20,17 +20,40 @@ FITNESS_SERVICES = [
 
 @dataclass
 class Discovered:
+    """A fitness device found during a BLE scan.
+
+    Attributes:
+        address (str): Device address.
+        name (str): Advertised device name.
+        rssi (int): Signal strength in dBm.
+        drivers (list[DriverId]): Matching driver identifiers, best first.
+    """
+
     address: str
     name: str
     rssi: int
-    drivers: list[str]  # best first
+    drivers: list[DriverId]  # best first
 
     @property
     def roles(self) -> set[str]:
+        """Roles the device can provide across all matching drivers.
+
+        Returns:
+            set[str]: Role values (e.g. ``"power"``, ``"hr"``).
+        """
         return {r.value for d in self.drivers for r in DRIVERS[d].ROLES}
 
 
 async def scan(timeout: float = 6.0) -> list[Discovered]:
+    """Scan for BLE fitness devices and match them to drivers.
+
+    Args:
+        timeout (float): Scan duration in seconds.
+
+    Returns:
+        list[Discovered]: Devices with at least one matching driver,
+        strongest signal first.
+    """
     found = await BleakScanner.discover(
         timeout=timeout, return_adv=True, service_uuids=FITNESS_SERVICES
     )
@@ -50,5 +73,22 @@ async def scan(timeout: float = 6.0) -> list[Discovered]:
     return sorted(out, key=lambda d: -d.rssi)
 
 
-def make_device(driver: str, address: str, name: str = "") -> Device:
-    return DRIVERS[driver](address, name)
+def make_device(driver: DriverId | str, address: str, name: str = "") -> Device:
+    """Instantiate a device using a registered driver.
+
+    Args:
+        driver (DriverId | str): Driver identifier (see :data:`DRIVERS`).
+        address (str): Device address.
+        name (str): Human-readable device name.
+
+    Returns:
+        Device: The new device instance.
+
+    Raises:
+        KeyError: If no driver is registered under ``driver``.
+    """
+    try:
+        driver_id = DriverId(driver)
+    except ValueError:
+        raise KeyError(driver) from None
+    return DRIVERS[driver_id](address, name)

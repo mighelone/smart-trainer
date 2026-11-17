@@ -9,7 +9,7 @@ from bleak import BleakClient
 
 from smart_trainer.ble import uuids
 from smart_trainer.ble.bleak_device import BleakDevice
-from smart_trainer.ble.device import ControllableTrainer, register
+from smart_trainer.ble.device import ControllableTrainer, DriverId, register
 from smart_trainer.ble.parsers import (
     FtmsOp,
     cmd_request_control,
@@ -27,23 +27,47 @@ log = logging.getLogger(__name__)
 
 @register
 class FtmsTrainer(BleakDevice, ControllableTrainer):
-    DRIVER = "ftms"
+    """Smart trainer implementing the Fitness Machine Service (FTMS).
+
+    Attributes:
+        RESPONSE_TIMEOUT (float): Seconds to wait for a control point response.
+        has_control (bool): Whether control of the trainer has been granted.
+    """
+
+    DRIVER = DriverId.FTMS
     SERVICE_UUID = uuids.FTMS_SERVICE
     ROLES = frozenset({Role.TRAINER, Role.POWER, Role.CADENCE, Role.SPEED})
     PRIORITY = 10
     RESPONSE_TIMEOUT = 3.0
 
     def __init__(self, address: str, name: str = "") -> None:
+        """Initialize the trainer.
+
+        Args:
+            address (str): BLE address (or platform UUID on macOS) of the trainer.
+            name (str): Human-readable device name; defaults to the address.
+        """
         super().__init__(address, name)
         self._responses: asyncio.Queue = asyncio.Queue()
         self._lock = asyncio.Lock()
         self.has_control = False
 
     async def on_connected(self, client: BleakClient) -> None:
+        """Subscribe to bike data and control point notifications, then take control.
+
+        Args:
+            client (BleakClient): The connected bleak client.
+        """
         self.has_control = False
         self._responses = asyncio.Queue()
 
         def on_bike_data(_char, data: bytearray) -> None:
+            """Parse an Indoor Bike Data notification and emit a reading.
+
+            Args:
+                _char (BleakGATTCharacteristic): Characteristic that sent the notification.
+                data (bytearray): Raw notification payload.
+            """
             d = parse_indoor_bike_data(bytes(data))
             self.emit(
                 Reading(
@@ -56,6 +80,12 @@ class FtmsTrainer(BleakDevice, ControllableTrainer):
             )
 
         def on_cp(_char, data: bytearray) -> None:
+            """Queue a parsed control point response.
+
+            Args:
+                _char (BleakGATTCharacteristic): Characteristic that sent the notification.
+                data (bytearray): Raw notification payload.
+            """
             resp = parse_control_response(bytes(data))
             if resp:
                 self._responses.put_nowait(resp)
@@ -65,6 +95,7 @@ class FtmsTrainer(BleakDevice, ControllableTrainer):
         await self._take_control()
 
     async def _take_control(self) -> None:
+        """Request control of the trainer and start it if granted."""
         r = await self._write(cmd_request_control())
         if r is not None and r.ok:
             await self._write(cmd_start())
@@ -73,6 +104,15 @@ class FtmsTrainer(BleakDevice, ControllableTrainer):
             log.warning("%s: request control refused (%s)", self.name, r)
 
     async def _write(self, payload: bytes):
+        """Write a control point command and wait for its response.
+
+        Args:
+            payload (bytes): Encoded control point command.
+
+        Returns:
+            ControlResponse | None: The matching response, or ``None`` if not
+            connected or no response arrived within ``RESPONSE_TIMEOUT``.
+        """
         client = self.client
         if client is None:
             return None
@@ -90,6 +130,14 @@ class FtmsTrainer(BleakDevice, ControllableTrainer):
                 return None
 
     async def _command(self, payload: bytes) -> bool:
+        """Send a control command, (re)taking control of the trainer if needed.
+
+        Args:
+            payload (bytes): Encoded control point command.
+
+        Returns:
+            bool: ``True`` if the trainer acknowledged the command successfully.
+        """
         if self.client is None:
             return False
         if not self.has_control:
@@ -101,12 +149,27 @@ class FtmsTrainer(BleakDevice, ControllableTrainer):
         return bool(r and r.ok)
 
     async def set_erg(self, watts: float) -> None:
+        """Set ERG mode with a target power.
+
+        Args:
+            watts (float): Target power in watts.
+        """
         await self._command(cmd_set_target_power(int(watts)))
 
     async def set_resistance(self, pct: float) -> None:
+        """Set a fixed resistance level.
+
+        Args:
+            pct (float): Resistance level as a percentage (0-100).
+        """
         await self._command(cmd_set_target_resistance(pct))
 
     async def set_slope(self, grade_pct: float) -> None:
+        """Set simulation mode with a road grade.
+
+        Args:
+            grade_pct (float): Road grade in percent.
+        """
         await self._command(cmd_set_simulation(grade_pct))
 
 

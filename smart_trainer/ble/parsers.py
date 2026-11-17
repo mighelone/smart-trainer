@@ -12,11 +12,26 @@ from dataclasses import dataclass
 # --------------------------------------------------------------------------- HR
 @dataclass(slots=True)
 class HeartRate:
+    """Decoded Heart Rate Measurement (0x2A37).
+
+    Attributes:
+        bpm (int): Heart rate in beats per minute.
+        rr_intervals_ms (list[float]): RR intervals in milliseconds, if present.
+    """
+
     bpm: int
     rr_intervals_ms: list[float]
 
 
 def parse_heart_rate(data: bytes) -> HeartRate:
+    """Parse a Heart Rate Measurement (0x2A37) payload.
+
+    Args:
+        data (bytes): Raw characteristic value.
+
+    Returns:
+        HeartRate: Decoded heart rate and RR intervals.
+    """
     flags = data[0]
     i = 1
     if flags & 0x01:
@@ -38,6 +53,15 @@ def parse_heart_rate(data: bytes) -> HeartRate:
 # ------------------------------------------------------------- Cycling power
 @dataclass(slots=True)
 class CyclingPower:
+    """Decoded Cycling Power Measurement (0x2A63).
+
+    Attributes:
+        power (int): Instantaneous power in watts.
+        balance_left_pct (float | None): Percentage contributed by the left pedal.
+        crank_revs (int | None): Cumulative crank revolutions (uint16).
+        crank_event_time (int | None): Last crank event time in 1/1024 s (uint16).
+    """
+
     power: int
     balance_left_pct: float | None = None  # percentage contributed by the LEFT pedal
     crank_revs: int | None = None  # cumulative, uint16
@@ -45,6 +69,14 @@ class CyclingPower:
 
 
 def parse_cycling_power(data: bytes) -> CyclingPower:
+    """Parse a Cycling Power Measurement (0x2A63) payload.
+
+    Args:
+        data (bytes): Raw characteristic value.
+
+    Returns:
+        CyclingPower: Decoded power, pedal balance and crank data.
+    """
     flags = struct.unpack_from("<H", data, 0)[0]
     power = struct.unpack_from("<h", data, 2)[0]
     i = 4
@@ -71,12 +103,28 @@ class CadenceCalculator:
     """Derives cadence (rpm) from cumulative crank revolutions / event time (uint16 rollover)."""
 
     def __init__(self, stale_after_s: float = 3.0) -> None:
+        """Initialize the calculator.
+
+        Args:
+            stale_after_s (float): Seconds without a new crank event after which
+                cadence drops to zero.
+        """
         self._last: tuple[int, int] | None = None
         self._cadence = 0.0
         self._idle_s = 0.0
         self._stale_after_s = stale_after_s
 
     def update(self, revs: int, event_time: int, dt_s: float = 1.0) -> float:
+        """Update the cadence with a new crank revolution sample.
+
+        Args:
+            revs (int): Cumulative crank revolutions (uint16).
+            event_time (int): Last crank event time in 1/1024 s (uint16).
+            dt_s (float): Seconds elapsed since the previous update.
+
+        Returns:
+            float: Current cadence in rpm.
+        """
         if self._last is None:
             self._last = (revs, event_time)
             return 0.0
@@ -100,6 +148,17 @@ class CadenceCalculator:
 # ------------------------------------------------------------ Indoor bike data
 @dataclass(slots=True)
 class IndoorBikeData:
+    """Decoded FTMS Indoor Bike Data (0x2AD2).
+
+    Attributes:
+        speed_kmh (float | None): Instantaneous speed in km/h.
+        cadence_rpm (float | None): Instantaneous cadence in rpm.
+        distance_m (int | None): Total distance in metres.
+        resistance_level (int | None): Current resistance level.
+        power (int | None): Instantaneous power in watts.
+        heart_rate (int | None): Heart rate in bpm.
+    """
+
     speed_kmh: float | None = None
     cadence_rpm: float | None = None
     distance_m: int | None = None
@@ -109,7 +168,16 @@ class IndoorBikeData:
 
 
 def parse_indoor_bike_data(data: bytes) -> IndoorBikeData:
-    """FTMS Indoor Bike Data (0x2AD2). Fields are present depending on flag bits."""
+    """Parse an FTMS Indoor Bike Data (0x2AD2) payload.
+
+    Fields are present depending on flag bits.
+
+    Args:
+        data (bytes): Raw characteristic value.
+
+    Returns:
+        IndoorBikeData: Decoded fields; absent fields are ``None``.
+    """
     flags = struct.unpack_from("<H", data, 0)[0]
     i = 2
     out = IndoorBikeData()
@@ -144,6 +212,8 @@ def parse_indoor_bike_data(data: bytes) -> IndoorBikeData:
 
 # ------------------------------------------------------- FTMS control point
 class FtmsOp:
+    """FTMS Control Point (0x2AD9) op codes."""
+
     REQUEST_CONTROL = 0x00
     RESET = 0x01
     SET_TARGET_RESISTANCE = 0x04
@@ -155,20 +225,47 @@ class FtmsOp:
 
 
 def cmd_request_control() -> bytes:
+    """Build the FTMS *Request Control* command.
+
+    Returns:
+        bytes: Encoded control point command.
+    """
     return bytes([FtmsOp.REQUEST_CONTROL])
 
 
 def cmd_start() -> bytes:
+    """Build the FTMS *Start or Resume* command.
+
+    Returns:
+        bytes: Encoded control point command.
+    """
     return bytes([FtmsOp.START_RESUME])
 
 
 def cmd_set_target_power(watts: int) -> bytes:
+    """Build the FTMS *Set Target Power* (ERG) command.
+
+    Args:
+        watts (int): Target power in watts, clamped to 0-2000.
+
+    Returns:
+        bytes: Encoded control point command.
+    """
     watts = max(0, min(round(watts), 2000))
     return struct.pack("<Bh", FtmsOp.SET_TARGET_POWER, watts)
 
 
 def cmd_set_target_resistance(level_pct: float) -> bytes:
-    """Resistance as 0-100 %. FTMS spec unit is 0.1 (uint8 in v1.0, many trainers accept 0-200)."""
+    """Build the FTMS *Set Target Resistance Level* command.
+
+    The FTMS spec unit is 0.1 (uint8 in v1.0, many trainers accept 0-200).
+
+    Args:
+        level_pct (float): Resistance as 0-100 %.
+
+    Returns:
+        bytes: Encoded control point command.
+    """
     level = max(0.0, min(level_pct, 100.0))
     return struct.pack("<BB", FtmsOp.SET_TARGET_RESISTANCE, round(level * 2) & 0xFF)
 
@@ -176,6 +273,17 @@ def cmd_set_target_resistance(level_pct: float) -> bytes:
 def cmd_set_simulation(
     grade_pct: float, wind_mps: float = 0.0, crr: float = 0.004, cw: float = 0.51
 ) -> bytes:
+    """Build the FTMS *Set Indoor Bike Simulation Parameters* command.
+
+    Args:
+        grade_pct (float): Road grade in percent, clamped to ±20.
+        wind_mps (float): Wind speed in m/s.
+        crr (float): Rolling resistance coefficient.
+        cw (float): Wind resistance coefficient in kg/m.
+
+    Returns:
+        bytes: Encoded control point command.
+    """
     grade_pct = max(-20.0, min(grade_pct, 20.0))
     return struct.pack(
         "<BhhBB",
@@ -189,16 +297,38 @@ def cmd_set_simulation(
 
 @dataclass(slots=True)
 class ControlResponse:
+    """Response to an FTMS control point command.
+
+    Attributes:
+        request_op (int): Op code of the command being answered.
+        result (int): Result code (0x01 success, 0x02 not supported,
+            0x03 invalid parameter, 0x04 failed, 0x05 not permitted).
+    """
+
     request_op: int
     # 0x01 success, 0x02 not supported, 0x03 invalid param, 0x04 failed, 0x05 not permitted
     result: int
 
     @property
     def ok(self) -> bool:
+        """Whether the command succeeded.
+
+        Returns:
+            bool: ``True`` if the result code is 0x01 (success).
+        """
         return self.result == 0x01
 
 
 def parse_control_response(data: bytes) -> ControlResponse | None:
+    """Parse an FTMS control point response indication.
+
+    Args:
+        data (bytes): Raw characteristic value.
+
+    Returns:
+        ControlResponse | None: The response, or ``None`` if the payload is
+        not a response.
+    """
     if len(data) >= 3 and data[0] == FtmsOp.RESPONSE:
         return ControlResponse(request_op=data[1], result=data[2])
     return None
