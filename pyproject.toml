@@ -42,6 +42,7 @@ dev = [
     "ruff>=0.17.5",
     "pyrefly>=1.4.1",
     "prek>=0.5.10",
+    "pytest-cov>=7.1.0",
 ]
 # Builds the macOS .app (see packaging/)
 package = [
@@ -60,6 +61,15 @@ build-backend = "hatchling.build"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["smart_trainer"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 50
 
 [tool.ruff]
 line-length = 100
