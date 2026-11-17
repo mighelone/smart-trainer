@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="dist/Smart Trainer.app"
-VERSION=$(uv run --no-sync python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+VERSION=$(uv run --no-project python packaging/version.py)  # from CHANGELOG.md
 DMG="dist/SmartTrainer-${VERSION}-macos-$(uname -m).dmg"
 
 uv sync --group package

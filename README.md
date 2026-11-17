@@ -19,8 +19,14 @@ The Mac app isn't notarized by Apple, so macOS blocks its first launch. See **[I
 for how to open it, Bluetooth permission, updating, uninstalling and troubleshooting.
 
 ### Releasing
-Bump `version` in `pyproject.toml`, commit, then push a tag `vX.Y.Z` (`vX.Y.Zrc1` for a
-pre-release). `.github/workflows/release.yml` builds the Apple Silicon DMG and attaches it to
+The version comes from [CHANGELOG.md](CHANGELOG.md): the first `## [X.Y.Z]` heading (not
+`[Unreleased]`) is the package version, the `.app` version and the DMG name. To release:
+1. Rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a new empty `## [Unreleased]` above it,
+   and update the compare links at the bottom.
+2. Commit, then push a matching tag `vX.Y.Z` (`vX.Y.Zrc1` for a pre-release). The workflow fails
+   if the tag doesn't match the changelog. `python packaging/version.py` prints the current version.
+
+`.github/workflows/release.yml` builds the Apple Silicon DMG and attaches it to
 the GitHub Release. **Actions → Release → Run workflow** builds it as a downloadable run artifact
 without releasing. To build locally: `packaging/build_macos.sh`.
 
