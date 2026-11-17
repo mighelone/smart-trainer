@@ -11,6 +11,7 @@ import contextlib
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from enum import StrEnum
 from typing import ClassVar
 
 from smart_trainer.core.state import ConnState, Reading, Role
@@ -18,6 +19,17 @@ from smart_trainer.core.state import ConnState, Reading, Role
 log = logging.getLogger(__name__)
 
 ReadingCallback = Callable[[Reading], None]
+
+
+class DriverId(StrEnum):
+    """Unique identifier of a device driver, persisted in the user settings."""
+
+    FTMS = "ftms"
+    CYCLING_POWER = "cycling_power"
+    HEART_RATE = "heart_rate"
+    FAKE_TRAINER = "fake_trainer"
+    FAKE_POWER = "fake_power"
+    FAKE_HR = "fake_hr"
 
 
 class Device(ABC):
@@ -29,7 +41,7 @@ class Device(ABC):
         SERVICE_UUID (str): BLE service UUID this driver handles.
         ROLES (frozenset[Role]): Data roles the device can provide.
         PRIORITY (int): Higher wins when a device matches several drivers.
-        DRIVER (str): Unique driver identifier used in the registry.
+        DRIVER (DriverId): Unique driver identifier used in the registry.
         address (str): Device address.
         name (str): Human-readable device name.
         state (ConnState): Current connection state.
@@ -38,7 +50,7 @@ class Device(ABC):
     SERVICE_UUID: ClassVar[str] = ""
     ROLES: ClassVar[frozenset[Role]] = frozenset()
     PRIORITY: ClassVar[int] = 0  # higher wins when a device matches several drivers
-    DRIVER: ClassVar[str] = ""
+    DRIVER: ClassVar[DriverId]
 
     def __init__(self, address: str, name: str | None = None) -> None:
         """Initialize the device.
@@ -155,7 +167,7 @@ class ControllableTrainer(ABC):
         """
 
 
-DRIVERS: dict[str, type[Device]] = {}
+DRIVERS: dict[DriverId, type[Device]] = {}
 
 
 def register(cls: type[Device]) -> type[Device]:

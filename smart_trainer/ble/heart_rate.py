@@ -6,7 +6,7 @@ from bleak import BleakClient
 
 from smart_trainer.ble import uuids
 from smart_trainer.ble.bleak_device import BleakDevice
-from smart_trainer.ble.device import register
+from smart_trainer.ble.device import DriverId, register
 from smart_trainer.ble.parsers import parse_heart_rate
 from smart_trainer.core.state import Reading, Role
 
@@ -15,7 +15,7 @@ from smart_trainer.core.state import Reading, Role
 class HeartRateMonitor(BleakDevice):
     """Any BLE heart-rate strap (Garmin HRM-Pro/Dual, Polar H10, Wahoo TICKR, ...)."""
 
-    DRIVER = "heart_rate"
+    DRIVER = DriverId.HEART_RATE
     SERVICE_UUID = uuids.HEART_RATE_SERVICE
     ROLES = frozenset({Role.HR})
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import random
 
-from smart_trainer.ble.device import ControllableTrainer, Device, register
+from smart_trainer.ble.device import ControllableTrainer, Device, DriverId, register
 from smart_trainer.core.state import ConnState, Reading, Role
 
 
@@ -87,7 +87,7 @@ class FakeTrainer(_FakeBase, ControllableTrainer):
         value (float): Target for the current mode (watts, percent or grade).
     """
 
-    DRIVER = "fake_trainer"
+    DRIVER = DriverId.FAKE_TRAINER
     ROLES = frozenset({Role.TRAINER, Role.POWER, Role.CADENCE, Role.SPEED})
 
     def __init__(self, address: str = "fake-trainer", name: str = "Fake Trainer", world=None):
@@ -145,7 +145,7 @@ class FakeTrainer(_FakeBase, ControllableTrainer):
 class FakePowerMeter(_FakeBase):
     """Simulated power meter reporting the rider's true power with noise."""
 
-    DRIVER = "fake_power"
+    DRIVER = DriverId.FAKE_POWER
     ROLES = frozenset({Role.POWER, Role.CADENCE})
 
     def __init__(self, address: str = "fake-pedals", name: str = "Fake Pedals", world=None):
@@ -177,7 +177,7 @@ class FakePowerMeter(_FakeBase):
 class FakeHeartRate(_FakeBase):
     """Simulated heart-rate monitor whose HR follows the rider's power."""
 
-    DRIVER = "fake_hr"
+    DRIVER = DriverId.FAKE_HR
     ROLES = frozenset({Role.HR})
 
     def __init__(self, address: str = "fake-hr", name: str = "Fake HRM", world=None):

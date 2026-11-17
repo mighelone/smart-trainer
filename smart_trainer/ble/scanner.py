@@ -8,7 +8,7 @@ from bleak import BleakScanner
 
 # Import driver modules so they register themselves.
 from smart_trainer.ble import cycling_power, ftms, heart_rate, uuids  # noqa: F401
-from smart_trainer.ble.device import DRIVERS, Device, drivers_for_services
+from smart_trainer.ble.device import DRIVERS, Device, DriverId, drivers_for_services
 
 FITNESS_SERVICES = [
     uuids.FTMS_SERVICE,
@@ -26,13 +26,13 @@ class Discovered:
         address (str): Device address.
         name (str): Advertised device name.
         rssi (int): Signal strength in dBm.
-        drivers (list[str]): Matching driver identifiers, best first.
+        drivers (list[DriverId]): Matching driver identifiers, best first.
     """
 
     address: str
     name: str
     rssi: int
-    drivers: list[str]  # best first
+    drivers: list[DriverId]  # best first
 
     @property
     def roles(self) -> set[str]:
@@ -73,15 +73,22 @@ async def scan(timeout: float = 6.0) -> list[Discovered]:
     return sorted(out, key=lambda d: -d.rssi)
 
 
-def make_device(driver: str, address: str, name: str = "") -> Device:
+def make_device(driver: DriverId | str, address: str, name: str = "") -> Device:
     """Instantiate a device using a registered driver.
 
     Args:
-        driver (str): Driver identifier (see :data:`DRIVERS`).
+        driver (DriverId | str): Driver identifier (see :data:`DRIVERS`).
         address (str): Device address.
         name (str): Human-readable device name.
 
     Returns:
         Device: The new device instance.
+
+    Raises:
+        KeyError: If no driver is registered under ``driver``.
     """
-    return DRIVERS[driver](address, name)
+    try:
+        driver_id = DriverId(driver)
+    except ValueError:
+        raise KeyError(driver) from None
+    return DRIVERS[driver_id](address, name)

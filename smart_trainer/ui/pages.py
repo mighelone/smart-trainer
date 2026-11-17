@@ -380,6 +380,14 @@ def ride_page() -> None:
     def refresh_chart() -> None:
         """Update the live power and heart-rate series of the chart."""
 
+        ch = chart_ref["chart"]
+        if ch is None or not e.history:
+            return
+        hist = list(e.history)
+        step = max(1, len(hist) // 1500)
+        # x = workout elapsed: approximate with recorded active seconds
+        offset = e.runner.elapsed - hist[-1].t if e.runner is not None else 0.0
+
         def x_of(p: HistoryPoint) -> float:
             """Chart x coordinate of a history point.
 
@@ -391,15 +399,6 @@ def ride_page() -> None:
             """
             return p.t + offset
 
-        ch = chart_ref["chart"]
-        if ch is None or not e.history:
-            return
-        hist = list(e.history)
-        step = max(1, len(hist) // 1500)
-        if e.runner is not None:
-            # x = workout elapsed: approximate with recorded active seconds
-            offset = e.runner.elapsed - hist[-1].t
-            x_of = lambda p: p.t + offset  # noqa: E731
         ch.options["series"][1]["data"] = [
             [round(x_of(p)), p.power] for p in hist[::step] if p.power is not None
         ]

@@ -8,7 +8,7 @@ from bleak import BleakClient
 
 from smart_trainer.ble import uuids
 from smart_trainer.ble.bleak_device import BleakDevice
-from smart_trainer.ble.device import register
+from smart_trainer.ble.device import DriverId, register
 from smart_trainer.ble.parsers import CadenceCalculator, parse_cycling_power
 from smart_trainer.core.state import Reading, Role
 
@@ -20,7 +20,7 @@ class PowerMeter(BleakDevice):
     Provides power, cadence (derived from crank revolutions) and L/R balance.
     """
 
-    DRIVER = "cycling_power"
+    DRIVER = DriverId.CYCLING_POWER
     SERVICE_UUID = uuids.CYCLING_POWER_SERVICE
     ROLES = frozenset({Role.POWER, Role.CADENCE})
     PRIORITY = 5

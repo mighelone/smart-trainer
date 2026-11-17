@@ -9,7 +9,7 @@ from bleak import BleakClient
 
 from smart_trainer.ble import uuids
 from smart_trainer.ble.bleak_device import BleakDevice
-from smart_trainer.ble.device import ControllableTrainer, register
+from smart_trainer.ble.device import ControllableTrainer, DriverId, register
 from smart_trainer.ble.parsers import (
     FtmsOp,
     cmd_request_control,
@@ -34,7 +34,7 @@ class FtmsTrainer(BleakDevice, ControllableTrainer):
         has_control (bool): Whether control of the trainer has been granted.
     """
 
-    DRIVER = "ftms"
+    DRIVER = DriverId.FTMS
     SERVICE_UUID = uuids.FTMS_SERVICE
     ROLES = frozenset({Role.TRAINER, Role.POWER, Role.CADENCE, Role.SPEED})
     PRIORITY = 10
