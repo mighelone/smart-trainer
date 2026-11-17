@@ -10,8 +10,8 @@ Indoor cycling app for macOS, written in Python. It:
 
 The app runs on your Mac because it talks to your Bluetooth devices. There are two ways to install it:
 
-- **Mac app:** download `SmartTrainer-<version>-macos-arm64.dmg` (Apple Silicon) or
-  `…-macos-x86_64.dmg` (Intel) from [Releases](https://github.com/mighelone/smart-trainer/releases),
+- **Mac app (Apple Silicon only):** download `SmartTrainer-<version>-macos-arm64.dmg` from
+  [Releases](https://github.com/mighelone/smart-trainer/releases),
   drag **Smart Trainer** to Applications and open it. It opens in its own window; macOS asks for
   Bluetooth permission on the first scan.
 
@@ -28,8 +28,8 @@ The app runs on your Mac because it talks to your Bluetooth devices. There are t
 
 ### Releasing
 Bump `version` in `pyproject.toml`, commit, then push a tag `vX.Y.Z` (`vX.Y.Zrc1` for a
-pre-release). `.github/workflows/release.yml` builds arm64 and x86_64 DMGs and attaches them to
-the GitHub Release. **Actions → Release → Run workflow** builds them as downloadable run artifacts
+pre-release). `.github/workflows/release.yml` builds the Apple Silicon DMG and attaches it to
+the GitHub Release. **Actions → Release → Run workflow** builds it as a downloadable run artifact
 without releasing. To build locally: `packaging/build_macos.sh`.
 
 Signing and notarization are optional and run only when the repository secrets `MACOS_CERT_P12`,
