@@ -1,0 +1,30 @@
+# Changelog
+
+All notable changes to Smart Trainer are documented here.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning](https://semver.org/).
+
+**The package version comes from this file:** it is the first `## [X.Y.Z]` heading below
+(`[Unreleased]` is skipped). To release, rename `[Unreleased]` to the new version and date, then
+push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-11-17
+
+### Added
+- Control FTMS smart trainers (Zwift Hub, KICKR, Neo, …) in ERG, resistance and slope mode.
+- Read Bluetooth power meters (Favero Assioma, …) and heart-rate straps (Garmin HRM, …).
+- Power matching: correct the trainer's ERG target so pedal power hits the target, with
+  fallback to trainer power if the pedals drop out.
+- Workouts from intervals.icu, built-in workouts, `.zwo` import and free ride, with auto-pause
+  when you stop pedalling.
+- Crash-safe recording to SQLite with Resume / Finish & save / Discard on the next launch.
+- FIT export and upload to intervals.icu, with retry from History.
+- Demo mode with simulated devices (`--fake`) and iPad/phone access over the LAN (`--lan`).
+- Desktop window mode (`--native`, default in the Mac app).
+- Mac app (Apple Silicon) as a DMG, built and attached to GitHub Releases by the release workflow.
+- Installation guide ([INSTALL.md](INSTALL.md)).
+
+[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.1.0
