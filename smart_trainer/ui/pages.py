@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, timedelta
 
 from nicegui import ui
 
-from smart_trainer.ble.device import DRIVERS
+from smart_trainer.ble.device import (
+    DRIVERS,
+    Calibratable,
+    CalibrationKind,
+    CalibrationPhase,
+)
 from smart_trainer.config import get_api_key, set_api_key
 from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine, HistoryPoint, RideState
@@ -219,7 +225,11 @@ def ride_page() -> None:
 
     def start() -> None:
         """Start a ride with the selected workout (or a free ride)."""
-        e.start_ride(S.selected)
+        try:
+            e.start_ride(S.selected)
+        except RuntimeError as exc:
+            ui.notify(str(exc), type="warning")
+            return
         ui.notify(f"Started: {S.selected.name if S.selected else 'free ride'}")
 
     async def do_finish(dialog, upload: bool) -> None:
@@ -269,8 +279,12 @@ def ride_page() -> None:
 
             def resume():
                 """Resume the unfinished session."""
+                try:
+                    e.resume_session(info)
+                except RuntimeError as exc:
+                    ui.notify(str(exc), type="warning")
+                    return
                 d.close()
-                e.resume_session(info)
                 ui.notify("Session resumed: start pedalling")
 
             async def finish():
@@ -522,6 +536,27 @@ def workouts_page() -> None:
 
 
 # ================================================================== DEVICES
+CALIBRATION_STEPS = {
+    CalibrationKind.SPIN_DOWN: [
+        "Warm up the trainer for about 10 minutes first.",
+        "Press Start, then pedal up to the target speed shown below.",
+        "When told to, stop pedalling completely and let the flywheel coast to a stop. "
+        "Don't touch the pedals until it's done.",
+    ],
+    CalibrationKind.ZERO_OFFSET: [
+        "Wake the power meter by turning the cranks a few times.",
+        "Unclip and put the cranks vertical (one pedal at 6 o'clock).",
+        "Keep the bike still, with no weight on the pedals, then press Start.",
+    ],
+}
+PHASE_LABEL = {
+    CalibrationPhase.STARTING: "Starting…",
+    CalibrationPhase.SPEED_UP: "Speed up",
+    CalibrationPhase.COAST: "Stop pedalling",
+    CalibrationPhase.MEASURING: "Measuring",
+}
+
+
 @ui.page("/devices")
 def devices_page() -> None:
     """Devices page: paired devices and BLE scanning/pairing."""
@@ -558,6 +593,14 @@ def devices_page() -> None:
                             "text-sm opacity-70"
                         )
                     ui.space()
+                    if isinstance(dev, Calibratable):
+                        blocker = e.calibration_blocker(did)
+                        cal_btn = ui.button(
+                            "Calibrate", icon="tune", on_click=lambda d=did: open_calibration(d)
+                        ).props("flat")
+                        if blocker:
+                            cal_btn.disable()
+                            cal_btn.tooltip(blocker)
 
                     async def remove(d=did):
                         """Forget a paired device.
@@ -613,6 +656,101 @@ def devices_page() -> None:
                                 icon=ROLE_ICON[role],
                                 on_click=lambda r=r, role=role: use(r, role),
                             )
+
+    # Created at page level: ``render_paired`` clears the device cards every 2 s.
+    cal_dialog = ui.dialog().props("persistent")
+    cal_task: list[asyncio.Task | None] = [None]
+
+    def open_calibration(device_id: str) -> None:
+        """Open the guided calibration dialog for a device.
+
+        Args:
+            device_id (str): Id of the device to calibrate.
+        """
+        dev = e.devices.get(device_id)
+        if not isinstance(dev, Calibratable):
+            return
+        spin_down = dev.CALIBRATION == CalibrationKind.SPIN_DOWN
+        cal_task[0] = None
+        cal_dialog.clear()
+        with cal_dialog, ui.card().classes("w-[32rem] max-w-full"):
+            title = "Spin-down calibration" if spin_down else "Zero-offset calibration"
+            ui.label(f"{title}: {dev.name}").classes("text-xl font-bold")
+            steps = CALIBRATION_STEPS[dev.CALIBRATION]
+            with ui.column().classes("gap-1"):
+                for i, text in enumerate(steps, 1):
+                    ui.label(f"{i}. {text}")
+            with ui.column().classes("w-full gap-1") as live:
+                phase_lbl = ui.label().classes("text-lg font-semibold")
+                msg_lbl = ui.label()
+                speed_lbl = ui.label().classes("text-3xl font-bold")
+                bar = ui.linear_progress(value=0, show_value=False).props("size=12px rounded")
+            live.set_visibility(False)
+            result_lbl = ui.label().classes("text-base")
+            with ui.row().classes("w-full justify-end"):
+                start_btn = ui.button("Start", icon="play_arrow", on_click=lambda: start())
+                cancel_btn = ui.button("Cancel", on_click=lambda: cancel()).props("flat")
+                close_btn = ui.button("Close", on_click=cal_dialog.close).props("flat")
+            cancel_btn.set_visibility(False)
+
+        def start() -> None:
+            """Start the calibration in the background."""
+            reason = e.calibration_blocker(device_id)
+            if reason:
+                ui.notify(reason, type="warning")
+                return
+            cal_task[0] = asyncio.create_task(e.calibrate(device_id))
+            render_paired()
+
+        def cancel() -> None:
+            """Cancel a running calibration."""
+            if cal_task[0] and not cal_task[0].done():
+                cal_task[0].cancel()
+
+        def update() -> None:
+            """Render the latest calibration progress."""
+            task = cal_task[0]
+            running = task is not None and not task.done()
+            start_btn.set_visibility(task is None or task.done())
+            if task is None:
+                start_btn.set_text("Start")
+            elif task.done():
+                failed = task.cancelled() or task.exception() is not None
+                start_btn.set_text("Try again" if failed else "Run again")
+            cancel_btn.set_visibility(running)
+            close_btn.set_visibility(not running)
+            p = e.calibration
+            if task is None or p is None:
+                return
+            live.set_visibility(running)
+            if running:
+                phase_lbl.set_text(PHASE_LABEL.get(p.phase, p.phase.value))
+                msg_lbl.set_text(p.message)
+                if p.speed_kmh is not None:
+                    target = (
+                        f" / target {p.target_low_kmh:.0f}-{p.target_high_kmh:.0f} km/h"
+                        if p.target_low_kmh and p.target_high_kmh
+                        else ""
+                    )
+                    speed_lbl.set_text(f"{p.speed_kmh:.1f} km/h{target}")
+                else:
+                    speed_lbl.set_text("")
+                if p.fraction is None:
+                    bar.props("indeterminate")
+                else:
+                    bar.props(remove="indeterminate")
+                    bar.set_value(p.fraction)
+                result_lbl.set_text("")
+            elif p.phase == CalibrationPhase.DONE:
+                result_lbl.set_text(f"✓ {p.message}")
+                result_lbl.classes(replace="text-base text-positive font-semibold")
+            else:
+                result_lbl.set_text(f"✗ {p.message}")
+                result_lbl.classes(replace="text-base text-negative font-semibold")
+
+        with cal_dialog:
+            ui.timer(0.3, update)
+        cal_dialog.open()
 
     def use(r, role: Role) -> None:
         """Assign a discovered device to a role, pairing it if needed.

@@ -221,6 +221,7 @@ class FtmsOp:
     START_RESUME = 0x07
     STOP_PAUSE = 0x08
     SET_SIMULATION = 0x11
+    SPIN_DOWN = 0x13
     RESPONSE = 0x80
 
 
@@ -240,6 +241,19 @@ def cmd_start() -> bytes:
         bytes: Encoded control point command.
     """
     return bytes([FtmsOp.START_RESUME])
+
+
+def cmd_spin_down(start: bool = True) -> bytes:
+    """Build the FTMS *Spin Down Control* command.
+
+    Args:
+        start (bool): ``True`` to start a spin-down, ``False`` to ignore one the
+            trainer requested.
+
+    Returns:
+        bytes: Encoded control point command.
+    """
+    return bytes([FtmsOp.SPIN_DOWN, 0x01 if start else 0x02])
 
 
 def cmd_set_target_power(watts: int) -> bytes:
@@ -303,11 +317,13 @@ class ControlResponse:
         request_op (int): Op code of the command being answered.
         result (int): Result code (0x01 success, 0x02 not supported,
             0x03 invalid parameter, 0x04 failed, 0x05 not permitted).
+        params (bytes): Response parameters following the result code, if any.
     """
 
     request_op: int
     # 0x01 success, 0x02 not supported, 0x03 invalid param, 0x04 failed, 0x05 not permitted
     result: int
+    params: bytes = b""
 
     @property
     def ok(self) -> bool:
@@ -330,5 +346,196 @@ def parse_control_response(data: bytes) -> ControlResponse | None:
         not a response.
     """
     if len(data) >= 3 and data[0] == FtmsOp.RESPONSE:
-        return ControlResponse(request_op=data[1], result=data[2])
+        return ControlResponse(request_op=data[1], result=data[2], params=bytes(data[3:]))
     return None
+
+
+RESULT_TEXT = {
+    0x01: "success",
+    0x02: "not supported",
+    0x03: "invalid parameter",
+    0x04: "operation failed",
+    0x05: "control not permitted",
+}
+
+
+def result_text(code: int) -> str:
+    """Describe an FTMS / Cycling Power control point result code.
+
+    Args:
+        code (int): Result code from a control point response.
+
+    Returns:
+        str: Human-readable description.
+    """
+    return RESULT_TEXT.get(code, f"error 0x{code:02x}")
+
+
+def parse_spin_down_targets(params: bytes) -> tuple[float, float] | None:
+    """Parse the target speeds returned with a successful *Spin Down Start*.
+
+    Args:
+        params (bytes): Response parameters (two uint16 in 0.01 km/h).
+
+    Returns:
+        tuple[float, float] | None: ``(low, high)`` target speed in km/h, or
+        ``None`` if the trainer sent none.
+    """
+    if len(params) < 4:
+        return None
+    low, high = struct.unpack_from("<HH", params, 0)
+    return low / 100.0, high / 100.0
+
+
+def ftms_spin_down_supported(feature: bytes) -> bool:
+    """Whether an FTMS Feature (0x2ACC) value advertises spin-down control.
+
+    Args:
+        feature (bytes): Raw characteristic value (machine + target setting features).
+
+    Returns:
+        bool: ``True`` if bit 15 of the target setting features is set.
+    """
+    if len(feature) < 8:
+        return False
+    target_features = struct.unpack_from("<I", feature, 4)[0]
+    return bool(target_features & (1 << 15))
+
+
+# ------------------------------------------------- FTMS machine status
+class FtmsStatus:
+    """Fitness Machine Status (0x2ADA) op codes used by the app."""
+
+    RESET = 0x01
+    STOPPED_BY_USER = 0x02
+    STARTED_BY_USER = 0x04
+    SPIN_DOWN_STATUS = 0x14
+    CONTROL_LOST = 0xFF
+
+
+class SpinDownStatus:
+    """Parameter of a *Spin Down Status* machine status."""
+
+    REQUESTED = 0x01
+    SUCCESS = 0x02
+    ERROR = 0x03
+    STOP_PEDALING = 0x04
+
+
+@dataclass(slots=True)
+class MachineStatus:
+    """Decoded Fitness Machine Status notification.
+
+    Attributes:
+        op (int): Status op code (see :class:`FtmsStatus`).
+        params (bytes): Status parameters.
+    """
+
+    op: int
+    params: bytes = b""
+
+
+def parse_machine_status(data: bytes) -> MachineStatus | None:
+    """Parse a Fitness Machine Status (0x2ADA) notification.
+
+    Args:
+        data (bytes): Raw characteristic value.
+
+    Returns:
+        MachineStatus | None: The status, or ``None`` for an empty payload.
+    """
+    if not data:
+        return None
+    return MachineStatus(op=data[0], params=bytes(data[1:]))
+
+
+# ------------------------------------------------ Cycling power control point
+class CpOp:
+    """Cycling Power Control Point (0x2A66) op codes used by the app."""
+
+    START_OFFSET_COMPENSATION = 0x0C
+    RESPONSE = 0x20
+
+
+def cmd_start_offset_compensation() -> bytes:
+    """Build the Cycling Power *Start Offset Compensation* (zero offset) command.
+
+    Returns:
+        bytes: Encoded control point command.
+    """
+    return bytes([CpOp.START_OFFSET_COMPENSATION])
+
+
+def parse_cp_control_response(data: bytes) -> ControlResponse | None:
+    """Parse a Cycling Power control point response indication.
+
+    Args:
+        data (bytes): Raw characteristic value.
+
+    Returns:
+        ControlResponse | None: The response (result codes as for FTMS, 0x05 unused),
+        or ``None`` if the payload is not a response.
+    """
+    if len(data) >= 3 and data[0] == CpOp.RESPONSE:
+        return ControlResponse(request_op=data[1], result=data[2], params=bytes(data[3:]))
+    return None
+
+
+def parse_offset(params: bytes) -> int | None:
+    """Parse the offset returned with a successful *Start Offset Compensation*.
+
+    Args:
+        params (bytes): Response parameters (sint16; N for force-based meters,
+            1/32 N·m for torque-based ones).
+
+    Returns:
+        int | None: The raw offset, or ``None`` if the meter sent none.
+    """
+    if len(params) < 2:
+        return None
+    return struct.unpack_from("<h", params, 0)[0]
+
+
+@dataclass(slots=True)
+class CpFeature:
+    """Decoded Cycling Power Feature (0x2A65), only the bits the app uses.
+
+    Attributes:
+        offset_compensation (bool): Whether *Start Offset Compensation* is supported.
+        torque_based (bool): Whether the meter measures torque (else force).
+    """
+
+    offset_compensation: bool
+    torque_based: bool
+
+
+def parse_cp_feature(data: bytes) -> CpFeature:
+    """Parse a Cycling Power Feature (0x2A65) value.
+
+    Args:
+        data (bytes): Raw characteristic value (uint32 flags).
+
+    Returns:
+        CpFeature: Offset compensation support and measurement context.
+    """
+    flags = int.from_bytes(data[:4], "little")
+    return CpFeature(
+        offset_compensation=bool(flags & (1 << 9)), torque_based=bool(flags & (1 << 16))
+    )
+
+
+def format_offset(offset: int, torque_based: bool | None) -> str:
+    """Format a raw zero offset with its unit, when known.
+
+    Args:
+        offset (int): Raw offset from :func:`parse_offset`.
+        torque_based (bool | None): Measurement context from the feature, if read.
+
+    Returns:
+        str: E.g. ``"512 (16.00 N·m)"`` or ``"512"``.
+    """
+    if torque_based is None:
+        return str(offset)
+    if torque_based:
+        return f"{offset} ({offset / 32:.2f} N·m)"
+    return f"{offset} N"
