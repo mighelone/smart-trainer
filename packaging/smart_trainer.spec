@@ -1,16 +1,14 @@
 # PyInstaller spec for the macOS app. Build with:  packaging/build_macos.sh
 # -*- mode: python ; coding: utf-8 -*-
-import sys
+from importlib.metadata import version
 from pathlib import Path
 
 import nicegui
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).parent
-sys.path.insert(0, SPECPATH)
-from version import project_version  # noqa: E402  (packaging/version.py)
-
-VERSION = project_version(ROOT)  # from CHANGELOG.md
+# Dynamic version (from CHANGELOG.md via hatch), read from the installed package metadata
+VERSION = version("smart-trainer")
 ICON = ROOT / "packaging" / "icon.icns"
 
 a = Analysis(
