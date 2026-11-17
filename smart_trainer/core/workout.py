@@ -11,6 +11,20 @@ ZONE_MID = {1: 0.50, 2: 0.65, 3: 0.82, 4: 0.97, 5: 1.12, 6: 1.35, 7: 1.60}
 
 @dataclass
 class Step:
+    """A single workout step with a steady or ramped power target.
+
+    Attributes:
+        duration_s (int): Duration of the step in seconds.
+        start (float): Target at the start of the step, as a fraction of FTP
+            (``unit="ftp"``) or in watts (``unit="watts"``).
+        end (float | None): Target at the end of the step for ramps; ``None``
+            for a steady step.
+        unit (str): Unit of ``start``/``end``, either ``"ftp"`` or ``"watts"``.
+        text (str): Optional cue text shown during the step.
+        free_ride (bool): If ``True`` the step has no power target.
+        cadence (int | None): Optional target cadence in rpm.
+    """
+
     duration_s: int
     start: float  # fraction of FTP (unit="ftp") or watts (unit="watts")
     end: float | None = None  # ramp end; None = steady
@@ -20,6 +34,15 @@ class Step:
     cadence: int | None = None
 
     def target_w(self, frac: float, ftp: int) -> float | None:
+        """Compute the power target at a given point of the step.
+
+        Args:
+            frac (float): Progress through the step, from 0.0 (start) to 1.0 (end).
+            ftp (int): Rider's functional threshold power in watts.
+
+        Returns:
+            float | None: Target power in watts, or ``None`` for a free-ride step.
+        """
         if self.free_ride:
             return None
         end = self.start if self.end is None else self.end
@@ -29,6 +52,16 @@ class Step:
 
 @dataclass
 class Workout:
+    """A structured workout made of a sequence of steps.
+
+    Attributes:
+        name (str): Workout name.
+        steps (list[Step]): Ordered list of workout steps.
+        description (str): Free-text description of the workout.
+        source_id (str | None): Identifier in the originating system
+            (e.g. intervals.icu event id), if any.
+    """
+
     name: str
     steps: list[Step] = field(default_factory=list)
     description: str = ""
@@ -36,13 +69,32 @@ class Workout:
 
     @property
     def duration_s(self) -> int:
+        """Total duration of the workout.
+
+        Returns:
+            int: Sum of all step durations in seconds.
+        """
         return sum(s.duration_s for s in self.steps)
 
     def to_dict(self) -> dict:
+        """Serialize the workout to a plain dictionary.
+
+        Returns:
+            dict: Dictionary representation of the workout and its steps.
+        """
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> Workout:
+        """Build a workout from a dictionary produced by :meth:`to_dict`.
+
+        Args:
+            d (dict): Dictionary with ``name`` and optional ``steps``,
+                ``description`` and ``source_id`` keys.
+
+        Returns:
+            Workout: The reconstructed workout.
+        """
         return cls(
             name=d["name"],
             steps=[Step(**s) for s in d.get("steps", [])],
@@ -51,6 +103,11 @@ class Workout:
         )
 
     def step_starts(self) -> list[int]:
+        """Compute the start time of each step.
+
+        Returns:
+            list[int]: Start offset of each step in seconds from workout start.
+        """
         out, t = [], 0
         for s in self.steps:
             out.append(t)
@@ -60,7 +117,17 @@ class Workout:
 
 # --------------------------------------------------------------- intervals.icu
 def _icu_power(p: dict | None, ftp: int) -> tuple[float, float | None, str] | None:
-    """Return (start, end, unit) from an intervals.icu power target."""
+    """Convert an intervals.icu power target into step target values.
+
+    Args:
+        p (dict | None): intervals.icu power target (``units``, ``value`` or
+            ``start``/``end``).
+        ftp (int): Rider's functional threshold power in watts.
+
+    Returns:
+        tuple[float, float | None, str] | None: ``(start, end, unit)`` tuple, or
+        ``None`` if the target is missing or uses unsupported units.
+    """
     if not p:
         return None
     units = (p.get("units") or "%ftp").lower()
@@ -82,9 +149,28 @@ def _icu_power(p: dict | None, ftp: int) -> tuple[float, float | None, str] | No
 def parse_intervals_doc(
     doc: dict, name: str = "Workout", ftp: int = 250, source_id: str | None = None
 ) -> Workout:
+    """Parse an intervals.icu ``workout_doc`` into a workout.
+
+    Repeat blocks are expanded, range targets on non-ramp steps are collapsed
+    to their midpoint and steps without a power target become free-ride steps.
+
+    Args:
+        doc (dict): intervals.icu ``workout_doc`` structure.
+        name (str): Name to give the workout.
+        ftp (int): Rider's functional threshold power in watts.
+        source_id (str | None): intervals.icu event id, if any.
+
+    Returns:
+        Workout: The parsed workout.
+    """
     steps: list[Step] = []
 
     def walk(items: list[dict]) -> None:
+        """Recursively flatten intervals.icu steps into ``steps``.
+
+        Args:
+            items (list[dict]): intervals.icu step dictionaries.
+        """
         for it in items:
             if it.get("reps") and it.get("steps"):
                 for _ in range(int(it["reps"])):
@@ -120,6 +206,17 @@ def parse_intervals_doc(
 
 # ------------------------------------------------------------------ Zwift .zwo
 def parse_zwo(xml_text: str) -> Workout:
+    """Parse a Zwift ``.zwo`` workout file.
+
+    Args:
+        xml_text (str): XML content of the ``.zwo`` file.
+
+    Raises:
+        ValueError: If the document has no ``<workout>`` element.
+
+    Returns:
+        Workout: The parsed workout.
+    """
     root = ET.fromstring(xml_text)
     name = (root.findtext("name") or "ZWO workout").strip()
     desc = (root.findtext("description") or "").strip()
@@ -147,9 +244,25 @@ def parse_zwo(xml_text: str) -> Workout:
 
 # --------------------------------------------------------------------- runner
 class WorkoutRunner:
-    """Tracks workout progress in *active* seconds (paused time doesn't count)."""
+    """Tracks workout progress in *active* seconds (paused time doesn't count).
+
+    Attributes:
+        workout (Workout): The workout being executed.
+        ftp (int): Rider's functional threshold power in watts.
+        elapsed (float): Active seconds elapsed since workout start.
+        intensity (float): Multiplier applied to every power target.
+        paused (bool): Whether progress is currently paused.
+    """
 
     def __init__(self, workout: Workout, ftp: int, elapsed_s: float = 0.0) -> None:
+        """Initialize the runner.
+
+        Args:
+            workout (Workout): The workout to execute.
+            ftp (int): Rider's functional threshold power in watts.
+            elapsed_s (float): Initial elapsed time in seconds, e.g. to resume
+                a workout.
+        """
         self.workout = workout
         self.ftp = ftp
         self.elapsed = float(elapsed_s)
@@ -159,30 +272,61 @@ class WorkoutRunner:
 
     @property
     def finished(self) -> bool:
+        """Whether the workout has been completed.
+
+        Returns:
+            bool: ``True`` if elapsed time has reached the workout duration.
+        """
         return self.elapsed >= self.workout.duration_s
 
     def advance(self, dt: float) -> None:
+        """Advance the workout clock unless paused or finished.
+
+        Args:
+            dt (float): Time step in seconds.
+        """
         if not self.paused and not self.finished:
             self.elapsed = min(self.elapsed + dt, float(self.workout.duration_s))
 
     def step_index(self) -> int:
+        """Find the index of the step at the current elapsed time.
+
+        Returns:
+            int: Index of the current step (0 if the workout has no steps).
+        """
         for i in range(len(self._starts) - 1, -1, -1):
             if self.elapsed >= self._starts[i]:
                 return i
         return 0
 
     def current(self) -> tuple[int, Step, float, float]:
-        """(index, step, seconds into step, seconds remaining in step)."""
+        """Describe the current step and the position within it.
+
+        Returns:
+            tuple[int, Step, float, float]: ``(index, step, seconds into step,
+            seconds remaining in step)``.
+        """
         i = min(self.step_index(), len(self.workout.steps) - 1)
         st = self.workout.steps[i]
         into = self.elapsed - self._starts[i]
         return i, st, into, max(0.0, st.duration_s - into)
 
     def next_step(self) -> Step | None:
+        """Get the step following the current one.
+
+        Returns:
+            Step | None: The next step, or ``None`` if on the last step.
+        """
         i = self.step_index() + 1
         return self.workout.steps[i] if i < len(self.workout.steps) else None
 
     def target_w(self) -> float | None:
+        """Compute the current power target, scaled by ``intensity``.
+
+        Returns:
+            float | None: Target power in watts, or ``None`` if the workout is
+            empty, finished, or the current step is free-ride.
+        """
         if not self.workout.steps or self.finished:
             return None
         _, st, into, _ = self.current()
@@ -190,13 +334,19 @@ class WorkoutRunner:
         return None if t is None else t * self.intensity
 
     def skip(self) -> None:
+        """Jump to the start of the next step, or to the end of the workout."""
         i = self.step_index() + 1
         self.elapsed = (
             float(self._starts[i]) if i < len(self._starts) else float(self.workout.duration_s)
         )
 
     def profile(self) -> list[tuple[int, float]]:
-        """(t, watts) points for drawing the workout chart."""
+        """Build the power profile used to draw the workout chart.
+
+        Returns:
+            list[tuple[int, float]]: ``(t, watts)`` points, two per step (start
+            and end), with free-ride steps drawn at 0 W.
+        """
         pts: list[tuple[int, float]] = []
         for start, st in zip(self._starts, self.workout.steps, strict=True):
             a = st.target_w(0, self.ftp) or 0

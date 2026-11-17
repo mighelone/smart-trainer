@@ -20,6 +20,15 @@ FITNESS_SERVICES = [
 
 @dataclass
 class Discovered:
+    """A fitness device found during a BLE scan.
+
+    Attributes:
+        address (str): Device address.
+        name (str): Advertised device name.
+        rssi (int): Signal strength in dBm.
+        drivers (list[str]): Matching driver identifiers, best first.
+    """
+
     address: str
     name: str
     rssi: int
@@ -27,10 +36,24 @@ class Discovered:
 
     @property
     def roles(self) -> set[str]:
+        """Roles the device can provide across all matching drivers.
+
+        Returns:
+            set[str]: Role values (e.g. ``"power"``, ``"hr"``).
+        """
         return {r.value for d in self.drivers for r in DRIVERS[d].ROLES}
 
 
 async def scan(timeout: float = 6.0) -> list[Discovered]:
+    """Scan for BLE fitness devices and match them to drivers.
+
+    Args:
+        timeout (float): Scan duration in seconds.
+
+    Returns:
+        list[Discovered]: Devices with at least one matching driver,
+        strongest signal first.
+    """
     found = await BleakScanner.discover(
         timeout=timeout, return_adv=True, service_uuids=FITNESS_SERVICES
     )
@@ -51,4 +74,14 @@ async def scan(timeout: float = 6.0) -> list[Discovered]:
 
 
 def make_device(driver: str, address: str, name: str = "") -> Device:
+    """Instantiate a device using a registered driver.
+
+    Args:
+        driver (str): Driver identifier (see :data:`DRIVERS`).
+        address (str): Device address.
+        name (str): Human-readable device name.
+
+    Returns:
+        Device: The new device instance.
+    """
     return DRIVERS[driver](address, name)

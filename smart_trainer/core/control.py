@@ -14,6 +14,8 @@ log = logging.getLogger(__name__)
 
 
 class Mode(StrEnum):
+    """Trainer control mode."""
+
     ERG = "erg"
     RESISTANCE = "resistance"
     SLOPE = "slope"
@@ -23,14 +25,25 @@ class PowerMatcher:
     """Makes the *pedal* power hit the ERG target while the trainer closes its own loop.
 
     1. Learns the ratio trainer_power / pedal_power (EMA, only while riding steadily) and
-       commands `target * ratio`. This handles a proportional calibration difference
+       commands ``target * ratio``. This handles a proportional calibration difference
        instantly on target changes.
     2. A slow integral term removes any residual pedal error (e.g. trainers whose ERG loop
        doesn't track their own reported power exactly).
+
     The total correction is clamped to ±max_offset_w.
+
+    Attributes:
+        cfg (PowerMatch): Tuning parameters.
+        ratio (float): Learned trainer/pedal power ratio.
+        integral (float): Accumulated integral correction in watts.
     """
 
     def __init__(self, cfg: PowerMatch) -> None:
+        """Initialize the matcher.
+
+        Args:
+            cfg (PowerMatch): Tuning parameters.
+        """
         self.cfg = cfg
         self.ratio = 1.0
         self.integral = 0.0
@@ -38,6 +51,7 @@ class PowerMatcher:
         self._target_changed_at = 0.0
 
     def reset(self) -> None:
+        """Reset the integral term and the target-change tracking."""
         self.integral = 0.0
         self._last_target = None
 
@@ -49,6 +63,18 @@ class PowerMatcher:
         trainer_avg: float | None,
         now: float | None = None,
     ) -> float:
+        """Compute the ERG command to send to the trainer.
+
+        Args:
+            target (float): Desired pedal power in watts.
+            snap (Snapshot): Current effective metrics.
+            pedal_avg (float | None): Recent average pedal power in watts.
+            trainer_avg (float | None): Recent average trainer power in watts.
+            now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
+
+        Returns:
+            float: Power command in watts, within ±max_offset_w of ``target``.
+        """
         now = now if now is not None else time.monotonic()
         c = self.cfg
         if self._last_target is None or abs(target - self._last_target) >= 1:
@@ -69,11 +95,28 @@ class PowerMatcher:
 
 
 class TrainerController:
-    """Holds the current mode/target and pushes changes to the trainer."""
+    """Holds the current mode/target and pushes changes to the trainer.
+
+    Attributes:
+        RESEND_S (float): Seconds after which an unchanged command is resent.
+        mode (Mode): Current control mode.
+        erg_target (float): ERG target power in watts.
+        resistance_pct (float): Resistance level in percent.
+        slope_pct (float): Simulated grade in percent.
+        use_pedals (bool): Whether to match pedal power in ERG mode.
+        matcher (PowerMatcher): Pedal power matcher.
+        last_command (tuple[Mode, float] | None): Last command sent to the trainer.
+        trainer (ControllableTrainer | None): Trainer being controlled.
+    """
 
     RESEND_S = 10.0
 
     def __init__(self, cfg: PowerMatch) -> None:
+        """Initialize the controller.
+
+        Args:
+            cfg (PowerMatch): Pedal power matching parameters.
+        """
         self.mode = Mode.RESISTANCE
         self.erg_target = 150.0
         self.resistance_pct = 25.0
@@ -85,11 +128,17 @@ class TrainerController:
         self.trainer: ControllableTrainer | None = None
 
     def set_mode(self, mode: Mode) -> None:
+        """Change the control mode, resetting the power matcher on change.
+
+        Args:
+            mode (Mode): The new control mode.
+        """
         if mode != self.mode:
             self.mode = mode
             self.matcher.reset()
 
     def force_resend(self) -> None:
+        """Force the next :meth:`apply` call to resend the command."""
         self.last_command = None
 
     def compute(
@@ -99,6 +148,17 @@ class TrainerController:
         trainer_avg: float | None,
         now: float | None = None,
     ) -> tuple[Mode, float]:
+        """Compute the command for the current mode.
+
+        Args:
+            snap (Snapshot): Current effective metrics.
+            pedal_avg (float | None): Recent average pedal power in watts.
+            trainer_avg (float | None): Recent average trainer power in watts.
+            now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
+
+        Returns:
+            tuple[Mode, float]: The mode and its value (watts, percent or grade).
+        """
         if self.mode == Mode.ERG:
             target = self.erg_target
             if self.use_pedals and snap.pedal_power is not None:
@@ -116,6 +176,19 @@ class TrainerController:
         connected: bool,
         now: float | None = None,
     ) -> tuple[Mode, float] | None:
+        """Send the current command to the trainer if it changed or is due a resend.
+
+        Args:
+            snap (Snapshot): Current effective metrics.
+            pedal_avg (float | None): Recent average pedal power in watts.
+            trainer_avg (float | None): Recent average trainer power in watts.
+            connected (bool): Whether the trainer is currently connected.
+            now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
+
+        Returns:
+            tuple[Mode, float] | None: The command sent, or ``None`` if nothing
+            was sent or sending failed.
+        """
         if self.trainer is None or not connected:
             self.last_command = None  # resend everything after reconnect
             return None

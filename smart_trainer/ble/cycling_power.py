@@ -1,3 +1,5 @@
+"""Driver for BLE Cycling Power Service meters."""
+
 from __future__ import annotations
 
 import time
@@ -13,7 +15,10 @@ from smart_trainer.core.state import Reading, Role
 
 @register
 class PowerMeter(BleakDevice):
-    """Any BLE Cycling Power meter (Favero Assioma, Garmin Rally, Stages, Quarq, ...)."""
+    """Any BLE Cycling Power meter (Favero Assioma, Garmin Rally, Stages, Quarq, ...).
+
+    Provides power, cadence (derived from crank revolutions) and L/R balance.
+    """
 
     DRIVER = "cycling_power"
     SERVICE_UUID = uuids.CYCLING_POWER_SERVICE
@@ -21,10 +26,21 @@ class PowerMeter(BleakDevice):
     PRIORITY = 5
 
     async def on_connected(self, client: BleakClient) -> None:
+        """Subscribe to Cycling Power Measurement notifications.
+
+        Args:
+            client (BleakClient): The connected bleak client.
+        """
         cadence = CadenceCalculator()
         last = [time.monotonic()]
 
         def handle(_char, data: bytearray) -> None:
+            """Parse a Cycling Power Measurement notification and emit a reading.
+
+            Args:
+                _char (BleakGATTCharacteristic): Characteristic that sent the notification.
+                data (bytearray): Raw notification payload.
+            """
             m = parse_cycling_power(bytes(data))
             now = time.monotonic()
             dt, last[0] = now - last[0], now

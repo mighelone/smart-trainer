@@ -14,13 +14,31 @@ log = logging.getLogger(__name__)
 
 
 class BleakDevice(Device):
+    """Base class for devices connected through a bleak ``BleakClient``.
+
+    Attributes:
+        CONNECT_TIMEOUT (float): Connection timeout in seconds.
+        client (BleakClient | None): Active client while connected, else ``None``.
+    """
+
     CONNECT_TIMEOUT = 20.0
 
     def __init__(self, address: str, name: str = "") -> None:
+        """Initialize the device.
+
+        Args:
+            address (str): BLE address (or platform UUID on macOS) of the device.
+            name (str): Human-readable device name; defaults to the address.
+        """
         super().__init__(address, name)
         self.client: BleakClient | None = None
 
     async def run_connected(self) -> None:
+        """Connect to the device and block until stopped or disconnected.
+
+        Calls :meth:`on_connected` once the link is up, then sets the state to
+        ``CONNECTED`` and waits for either a stop request or a lost connection.
+        """
         lost = asyncio.Event()
         client = BleakClient(
             self.address, disconnected_callback=lambda _c: lost.set(), timeout=self.CONNECT_TIMEOUT
@@ -42,5 +60,12 @@ class BleakDevice(Device):
         log.info("%s: disconnected", self.name)
 
     async def on_connected(self, client: BleakClient) -> None:
-        """Subscribe to notifications / initialise the device."""
+        """Subscribe to notifications / initialise the device.
+
+        Args:
+            client (BleakClient): The connected bleak client.
+
+        Raises:
+            NotImplementedError: Must be implemented by subclasses.
+        """
         raise NotImplementedError

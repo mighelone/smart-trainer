@@ -30,15 +30,49 @@ GAP_S = 5.0  # a hole longer than this (pause, crash) becomes a timer stop/start
 
 
 def _ms(t: float) -> int:
+    """Convert unix seconds to integer milliseconds.
+
+    Args:
+        t (float): Unix time in seconds.
+
+    Returns:
+        int: Unix time in milliseconds.
+    """
     return round(t * 1000)
 
 
 def _stats(rows) -> dict:
+    """Compute summary statistics over samples.
+
+    Args:
+        rows (list[sqlite3.Row]): Recorded samples.
+
+    Returns:
+        dict: Average/max power, average/max HR and average cadence
+        (``None`` where no data).
+    """
+
     def avg(key):
+        """Average of a column, ignoring ``None``.
+
+        Args:
+            key (str): Column name.
+
+        Returns:
+            float | None: The average, or ``None`` if no values.
+        """
         v = [r[key] for r in rows if r[key] is not None]
         return sum(v) / len(v) if v else None
 
     def mx(key):
+        """Maximum of a column, ignoring ``None``.
+
+        Args:
+            key (str): Column name.
+
+        Returns:
+            float | None: The maximum, or ``None`` if no values.
+        """
         v = [r[key] for r in rows if r[key] is not None]
         return max(v) if v else None
 
@@ -52,6 +86,15 @@ def _stats(rows) -> dict:
 
 
 def _fill_summary(msg, rows, start: float, end: float, timer_s: float) -> None:
+    """Fill the summary fields of a FIT lap or session message.
+
+    Args:
+        msg (LapMessage | SessionMessage): Message to fill in place.
+        rows (list[sqlite3.Row]): Samples covered by the message.
+        start (float): Unix start time.
+        end (float): Unix end time.
+        timer_s (float): Total timer time in seconds.
+    """
     s = _stats(rows)
     msg.start_time = _ms(start)
     msg.timestamp = _ms(end)
@@ -71,6 +114,21 @@ def _fill_summary(msg, rows, start: float, end: float, timer_s: float) -> None:
 
 
 def export_fit(rec: Recorder, out_path: Path) -> Path:
+    """Export a recorded session to a FIT activity file.
+
+    Paused samples are skipped and gaps longer than ``GAP_S`` become
+    timer stop/start events. One lap is written per recorded lap number.
+
+    Args:
+        rec (Recorder): The session to export.
+        out_path (Path): Destination FIT file path.
+
+    Raises:
+        ValueError: If the session has no (unpaused) samples.
+
+    Returns:
+        Path: The written FIT file path.
+    """
     rows = [r for r in rec.samples() if not r["paused"]]
     if not rows:
         raise ValueError("session has no samples")
@@ -86,6 +144,12 @@ def export_fit(rec: Recorder, out_path: Path) -> Path:
     b.add(fid)
 
     def event(t: float, et: EventType) -> None:
+        """Add a timer event message.
+
+        Args:
+            t (float): Unix time of the event.
+            et (EventType): Event type (start or stop).
+        """
         e = EventMessage()
         e.event = Event.TIMER
         e.event_type = et

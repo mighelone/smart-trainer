@@ -2,6 +2,14 @@
 
 
 def sig(short: int) -> str:
+    """Expand a 16-bit Bluetooth SIG UUID to its full 128-bit form.
+
+    Args:
+        short (int): 16-bit assigned number (e.g. ``0x1826``).
+
+    Returns:
+        str: The full lowercase 128-bit UUID string.
+    """
     return f"0000{short:04x}-0000-1000-8000-00805f9b34fb"
 
 

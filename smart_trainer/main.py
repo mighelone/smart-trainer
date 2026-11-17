@@ -19,6 +19,11 @@ log = logging.getLogger("smart_trainer")
 
 
 def _startup(use_fake: bool) -> None:
+    """Load settings, create the engine and its devices, and start it.
+
+    Args:
+        use_fake (bool): Use simulated devices and a read-only demo configuration.
+    """
     settings = Settings.load()
     sessions = None
     if use_fake:
@@ -46,6 +51,7 @@ def _startup(use_fake: bool) -> None:
 
 
 def run() -> None:
+    """Parse command-line arguments and run the NiceGUI app."""
     parser = argparse.ArgumentParser(description="Smart trainer app")
     parser.add_argument("--fake", action="store_true", help="use simulated devices")
     parser.add_argument(

@@ -21,6 +21,14 @@ log = logging.getLogger(__name__)
 
 
 class AppState:
+    """Global UI state shared by all pages.
+
+    Attributes:
+        engine (Engine): The application engine.
+        selected (Workout | None): Workout selected for the next ride.
+        fake (bool): Whether the app runs with simulated devices.
+    """
+
     engine: Engine
     selected: Workout | None = None
     fake: bool = False
@@ -43,7 +51,11 @@ ROLE_ICON = {
 
 
 def frame(title: str) -> None:
-    """Common header with navigation and device status chips."""
+    """Common header with navigation and device status chips.
+
+    Args:
+        title (str): Page title shown in the header.
+    """
     with ui.header().classes("items-center justify-between px-4 py-2 bg-slate-900"):
         with ui.row().classes("items-center gap-2"):
             ui.icon("directions_bike", size="md")
@@ -65,6 +77,7 @@ def frame(title: str) -> None:
         chips = ui.row().classes("gap-1")
 
     def refresh_chips() -> None:
+        """Redraw the device status chips."""
         chips.clear()
         e = S.engine
         with chips:
@@ -85,6 +98,7 @@ def frame(title: str) -> None:
 # ===================================================================== RIDE
 @ui.page("/")
 def ride_page() -> None:
+    """Ride page: live metrics, workout chart and ride controls."""
     e = S.engine
     frame("Ride")
     ftp = e.settings.ftp
@@ -108,6 +122,7 @@ def ride_page() -> None:
         chart_ref: dict = {"chart": None, "workout": object()}
 
         def ensure_chart() -> None:
+            """Recreate the chart when the displayed workout changes."""
             wo = (
                 e.runner.workout
                 if e.runner
@@ -171,6 +186,11 @@ def ride_page() -> None:
             )
 
     def set_manual_mode(m: str) -> None:
+        """Switch the manual control mode and adapt the slider range.
+
+        Args:
+            m (str): Mode value (``"resistance"``, ``"slope"`` or ``"erg"``).
+        """
         c = e.controller
         c.set_mode(Mode(m))
         if m == "resistance":
@@ -184,6 +204,11 @@ def ride_page() -> None:
             slider.value = c.erg_target
 
     def set_manual_value(v: float) -> None:
+        """Apply the slider value to the current manual mode.
+
+        Args:
+            v (float): Slider value (percent, grade or watts depending on mode).
+        """
         c = e.controller
         if c.mode == Mode.RESISTANCE:
             c.resistance_pct = v
@@ -193,10 +218,17 @@ def ride_page() -> None:
             c.erg_target = v
 
     def start() -> None:
+        """Start a ride with the selected workout (or a free ride)."""
         e.start_ride(S.selected)
         ui.notify(f"Started: {S.selected.name if S.selected else 'free ride'}")
 
     async def do_finish(dialog, upload: bool) -> None:
+        """Finish the ride and notify the result.
+
+        Args:
+            dialog (ui.dialog): Confirmation dialog to close.
+            upload (bool): Whether to upload the ride to intervals.icu.
+        """
         dialog.close()
         n = ui.notification("Saving session…", spinner=True, timeout=None)
         fit = await e.finish(upload=upload)
@@ -207,6 +239,7 @@ def ride_page() -> None:
             ui.notify(m)
 
     def confirm_finish() -> None:
+        """Ask the rider how to finish the session."""
         with ui.dialog() as d, ui.card():
             ui.label("Finish this session?").classes("text-lg")
             with ui.row():
@@ -219,6 +252,7 @@ def ride_page() -> None:
 
     # ------------------------------------------------------------ recovery
     def recovery_dialog() -> None:
+        """Offer to resume, finish or discard an unfinished session."""
         if e.state != RideState.IDLE:
             return
         crashed = e.unfinished_sessions()
@@ -234,16 +268,19 @@ def ride_page() -> None:
             ui.label("The app was closed or crashed during this ride.").classes("opacity-70")
 
             def resume():
+                """Resume the unfinished session."""
                 d.close()
                 e.resume_session(info)
                 ui.notify("Session resumed: start pedalling")
 
             async def finish():
+                """Finalize the unfinished session without resuming it."""
                 d.close()
                 fit = await e.finish_crashed(info)
                 ui.notify(f"Saved {fit.name if fit else 'session'}")
 
             def discard():
+                """Move the unfinished session to the discarded folder."""
                 d.close()
                 e.discard(info)
                 ui.notify("Session moved to sessions/discarded")
@@ -258,6 +295,7 @@ def ride_page() -> None:
 
     # ------------------------------------------------------------- refresh
     def refresh() -> None:
+        """Update tiles, labels, buttons and controls from the engine state."""
         ensure_chart()
         snap = e.snapshot
         riding = e.state == RideState.RIDING
@@ -340,7 +378,17 @@ def ride_page() -> None:
     tick = {"n": 0}
 
     def refresh_chart() -> None:
+        """Update the live power and heart-rate series of the chart."""
+
         def x_of(p: HistoryPoint) -> float:
+            """Chart x coordinate of a history point.
+
+            Args:
+                p (HistoryPoint): The history point.
+
+            Returns:
+                float: The x coordinate in seconds.
+            """
             return p.t + offset
 
         ch = chart_ref["chart"]
@@ -364,6 +412,7 @@ def ride_page() -> None:
         ch.update()
 
     def loop() -> None:
+        """Refresh the page, and the chart every other call."""
         refresh()
         tick["n"] += 1
         if tick["n"] % 2 == 0:
@@ -375,6 +424,7 @@ def ride_page() -> None:
 # ================================================================= WORKOUTS
 @ui.page("/workouts")
 def workouts_page() -> None:
+    """Workouts page: planned intervals.icu workouts, built-ins and .zwo import."""
     e = S.engine
     frame("Workouts")
     with ui.column().classes("w-full p-4 gap-4"):
@@ -393,11 +443,21 @@ def workouts_page() -> None:
         builtin = ui.column().classes("w-full gap-3")
 
     def choose(wo: Workout | None) -> None:
+        """Select a workout for the next ride and go to the ride page.
+
+        Args:
+            wo (Workout | None): The workout, or ``None`` for a free ride.
+        """
         S.selected = wo
         ui.notify(f"Selected {wo.name}" if wo else "Free ride selected")
         ui.navigate.to("/")
 
     async def import_zwo(ev) -> None:
+        """Parse an uploaded ``.zwo`` file and select it.
+
+        Args:
+            ev (UploadEventArguments): The upload event.
+        """
         try:
             wo = parse_zwo(await ev.file.text())
         except Exception as exc:
@@ -406,6 +466,14 @@ def workouts_page() -> None:
         choose(wo)
 
     def card(wo: Workout, subtitle: str, where=None) -> None:
+        """Render a workout card with its profile and a "Ride this" button.
+
+        Args:
+            wo (Workout): The workout to show.
+            subtitle (str): Text shown under the workout name.
+            where (ui.element | None): Container to render into; defaults to the
+                intervals.icu listing.
+        """
         with where or listing, ui.card().classes("w-full"):
             with ui.row().classes("items-center w-full"):
                 with ui.column().classes("gap-0"):
@@ -420,6 +488,7 @@ def workouts_page() -> None:
             workout_chart(wo, e.settings.ftp, height="h-28", live=False)
 
     async def load() -> None:
+        """Load planned workouts from intervals.icu into the listing."""
         listing.clear()
         key = get_api_key()
         if not key:
@@ -456,6 +525,7 @@ def workouts_page() -> None:
 # ================================================================== DEVICES
 @ui.page("/devices")
 def devices_page() -> None:
+    """Devices page: paired devices and BLE scanning/pairing."""
     e = S.engine
     frame("Devices")
     with ui.column().classes("w-full p-4 gap-4"):
@@ -471,6 +541,7 @@ def devices_page() -> None:
         found = ui.column().classes("w-full gap-2")
 
     def render_paired() -> None:
+        """Redraw the list of paired devices."""
         paired.clear()
         roles_by_dev: dict[str, list[str]] = {}
         for role, did in e.selector.assignment.items():
@@ -490,6 +561,11 @@ def devices_page() -> None:
                     ui.space()
 
                     async def remove(d=did):
+                        """Forget a paired device.
+
+                        Args:
+                            d (str): Id of the device to remove.
+                        """
                         await e.remove_device(d)
                         e.settings.save()
                         render_paired()
@@ -497,6 +573,7 @@ def devices_page() -> None:
                     ui.button(icon="link_off", on_click=remove).props("flat").tooltip("Forget")
 
     async def do_scan() -> None:
+        """Scan for BLE devices and list them with role buttons."""
         from smart_trainer.ble.scanner import scan
 
         found.clear()
@@ -539,6 +616,12 @@ def devices_page() -> None:
                             )
 
     def use(r, role: Role) -> None:
+        """Assign a discovered device to a role, pairing it if needed.
+
+        Args:
+            r (Discovered): The discovered device.
+            role (Role): The role to assign.
+        """
         from smart_trainer.ble.scanner import make_device
 
         dev = e.devices.get(r.address) or make_device(r.drivers[0], r.address, r.name)
@@ -566,6 +649,7 @@ def devices_page() -> None:
 # ================================================================== HISTORY
 @ui.page("/history")
 def history_page() -> None:
+    """History page: recorded sessions and manual upload."""
     e = S.engine
     frame("History")
     with ui.column().classes("w-full p-4 gap-2"):
@@ -573,6 +657,7 @@ def history_page() -> None:
         listing = ui.column().classes("w-full gap-2")
 
     def render() -> None:
+        """Redraw the list of recorded sessions."""
         listing.clear()
         with listing:
             for s in list_sessions(e.sessions):
@@ -595,6 +680,12 @@ def history_page() -> None:
                     if s.status == "finished" and fit.exists():
 
                         async def up(s=s, fit=fit):
+                            """Upload a finished session to intervals.icu.
+
+                            Args:
+                                s (SessionInfo): The session to upload.
+                                fit (Path): Path of the session's FIT file.
+                            """
                             rec = Recorder.open(s.path)
                             try:
                                 ok = await e.upload(rec, fit, s)
@@ -614,6 +705,7 @@ def history_page() -> None:
 # ================================================================= SETTINGS
 @ui.page("/settings")
 def settings_page() -> None:
+    """Settings page: rider profile, intervals.icu and power matching."""
     e = S.engine
     st = e.settings
     frame("Settings")
@@ -644,6 +736,7 @@ def settings_page() -> None:
         )
 
         async def save() -> None:
+            """Validate the form values and persist the settings."""
             # ui.number yields None when a field is cleared: keep the current value then.
             pm = st.power_match
             st.ftp = int(ftp.value) if ftp.value is not None else st.ftp
@@ -661,6 +754,7 @@ def settings_page() -> None:
             ui.notify("Settings saved", type="positive")
 
         async def test_key() -> None:
+            """Check the intervals.icu API key by fetching the athlete profile."""
             k = key.value.strip() or get_api_key()
             if not k:
                 ui.notify("Enter an API key first", type="warning")
