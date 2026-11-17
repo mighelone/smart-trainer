@@ -9,7 +9,19 @@ from __future__ import annotations
 import asyncio
 import random
 
-from smart_trainer.ble.device import ControllableTrainer, Device, DriverId, register
+from smart_trainer.ble.device import (
+    Calibratable,
+    CalibrationError,
+    CalibrationKind,
+    CalibrationPhase,
+    CalibrationProgress,
+    CalibrationResult,
+    ControllableTrainer,
+    Device,
+    DriverId,
+    ProgressCallback,
+    register,
+)
 from smart_trainer.core.state import ConnState, Reading, Role
 
 
@@ -23,6 +35,7 @@ class FakeWorld:
         tick_s (float): Simulation tick interval in seconds.
         hr (float): Current heart rate in bpm.
         pedals_alive (bool): Whether the fake power meter emits readings.
+        calibration_fails (bool): Whether simulated calibrations report an error.
     """
 
     def __init__(self, trainer_bias: float = 1.04, tick_s: float = 1.0) -> None:
@@ -38,6 +51,7 @@ class FakeWorld:
         self.tick_s = tick_s
         self.hr = 95.0
         self.pedals_alive = True
+        self.calibration_fails = False
 
 
 WORLD = FakeWorld()
@@ -79,16 +93,20 @@ class _FakeBase(Device):
 
 
 @register
-class FakeTrainer(_FakeBase, ControllableTrainer):
-    """Simulated controllable smart trainer.
+class FakeTrainer(_FakeBase, ControllableTrainer, Calibratable):
+    """Simulated controllable smart trainer with a simulated spin-down.
 
     Attributes:
+        SPIN_DOWN_TARGET (tuple[float, float]): Target speed range in km/h.
         mode (str): Control mode, one of ``"erg"``, ``"resistance"`` or ``"slope"``.
         value (float): Target for the current mode (watts, percent or grade).
+        calibration_speed (float | None): Simulated speed while spinning down, else ``None``.
     """
 
     DRIVER = DriverId.FAKE_TRAINER
     ROLES = frozenset({Role.TRAINER, Role.POWER, Role.CADENCE, Role.SPEED})
+    CALIBRATION = CalibrationKind.SPIN_DOWN
+    SPIN_DOWN_TARGET = (32.0, 36.0)
 
     def __init__(self, address: str = "fake-trainer", name: str = "Fake Trainer", world=None):
         """Initialize the fake trainer.
@@ -100,6 +118,7 @@ class FakeTrainer(_FakeBase, ControllableTrainer):
         """
         super().__init__(address, name, world)
         self.mode, self.value = "resistance", 30.0
+        self.calibration_speed: float | None = None
 
     async def set_erg(self, watts: float) -> None:
         """Set ERG mode with a target power.
@@ -125,9 +144,68 @@ class FakeTrainer(_FakeBase, ControllableTrainer):
         """
         self.mode, self.value = "slope", float(grade_pct)
 
+    async def calibrate(self, on_progress: ProgressCallback) -> CalibrationResult:
+        """Simulate a spin-down: the rider speeds up, stops pedalling, the flywheel coasts.
+
+        Args:
+            on_progress (ProgressCallback): Called with every progress update.
+
+        Returns:
+            CalibrationResult: The outcome.
+
+        Raises:
+            CalibrationError: If ``world.calibration_fails`` is set.
+        """
+        low, high = self.SPIN_DOWN_TARGET
+        dt = self.world.tick_s / 2
+        on_progress(
+            CalibrationProgress(CalibrationPhase.STARTING, "Asking the trainer for a spin-down…")
+        )
+        await asyncio.sleep(dt)
+        speed = 20.0
+        self.calibration_speed = speed
+        try:
+            while speed < high:
+                speed = min(high + 1, speed + random.uniform(1.5, 3.0))
+                self.calibration_speed = speed
+                on_progress(
+                    CalibrationProgress(
+                        CalibrationPhase.SPEED_UP,
+                        f"Pedal up to {high:.0f} km/h and hold it until the trainer says stop.",
+                        speed,
+                        low,
+                        high,
+                        min(1.0, speed / high),
+                    )
+                )
+                await asyncio.sleep(dt)
+            start = speed
+            while speed > 1:
+                speed *= 0.75
+                self.calibration_speed = speed
+                on_progress(
+                    CalibrationProgress(
+                        CalibrationPhase.COAST,
+                        "Stop pedalling and let the flywheel coast. Don't touch the pedals.",
+                        speed,
+                        low,
+                        high,
+                        1 - speed / start,
+                    )
+                )
+                await asyncio.sleep(dt)
+                if self.world.calibration_fails and speed < start / 2:
+                    raise CalibrationError("The trainer reported a spin-down error (simulated).")
+        finally:
+            self.calibration_speed = None
+        return CalibrationResult("Spin-down calibration complete.")
+
     def step(self) -> None:
         """Move the rider's true power towards the mode's goal and emit a biased reading."""
         w = self.world
+        if self.calibration_speed is not None:  # spinning down: only the flywheel speed
+            self.emit(Reading(self.id, power=0, cadence=0, speed_kmh=self.calibration_speed))
+            return
         if self.mode == "erg":
             goal = self.value / w.trainer_bias  # trainer closes the loop on its OWN reading
         elif self.mode == "resistance":
@@ -142,11 +220,12 @@ class FakeTrainer(_FakeBase, ControllableTrainer):
 
 
 @register
-class FakePowerMeter(_FakeBase):
+class FakePowerMeter(_FakeBase, Calibratable):
     """Simulated power meter reporting the rider's true power with noise."""
 
     DRIVER = DriverId.FAKE_POWER
     ROLES = frozenset({Role.POWER, Role.CADENCE})
+    CALIBRATION = CalibrationKind.ZERO_OFFSET
 
     def __init__(self, address: str = "fake-pedals", name: str = "Fake Pedals", world=None):
         """Initialize the fake power meter.
@@ -157,6 +236,38 @@ class FakePowerMeter(_FakeBase):
             world (FakeWorld | None): Simulation state; defaults to the global ``WORLD``.
         """
         super().__init__(address, name, world)
+
+    async def calibrate(self, on_progress: ProgressCallback) -> CalibrationResult:
+        """Simulate a zero-offset calibration.
+
+        Args:
+            on_progress (ProgressCallback): Called with every progress update.
+
+        Returns:
+            CalibrationResult: The outcome, with a simulated raw offset.
+
+        Raises:
+            CalibrationError: If ``world.calibration_fails`` is set.
+        """
+        steps = 6
+        for i in range(steps):
+            on_progress(
+                CalibrationProgress(
+                    CalibrationPhase.MEASURING,
+                    "Measuring the zero offset: keep the cranks still…",
+                    fraction=i / steps,
+                )
+            )
+            await asyncio.sleep(self.world.tick_s / 2)
+        if self.world.calibration_fails:
+            raise CalibrationError(
+                "Calibration failed (operation failed). Unclip, keep the cranks still with "
+                "no weight on the pedals, and try again. (simulated)"
+            )
+        offset = 512 + random.randint(-20, 20)
+        return CalibrationResult(
+            f"Zero offset calibration complete: offset {offset} ({offset / 32:.2f} N·m).", offset
+        )
 
     def step(self) -> None:
         """Emit a noisy power/cadence/balance reading unless the pedals are "dead"."""

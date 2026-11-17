@@ -11,6 +11,7 @@ import contextlib
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar
 
@@ -164,6 +165,89 @@ class ControllableTrainer(ABC):
 
         Args:
             grade_pct (float): Road grade in percent.
+        """
+
+
+class CalibrationKind(StrEnum):
+    """Kind of calibration a device supports."""
+
+    SPIN_DOWN = "spin_down"  # smart trainer (FTMS spin-down)
+    ZERO_OFFSET = "zero_offset"  # power meter (Cycling Power offset compensation)
+
+
+class CalibrationPhase(StrEnum):
+    """Step of a running calibration, used to guide the rider."""
+
+    STARTING = "starting"
+    SPEED_UP = "speed_up"  # pedal up to the target speed
+    COAST = "coast"  # stop pedalling, let the flywheel spin down
+    MEASURING = "measuring"  # keep still while the device measures
+    DONE = "done"
+    FAILED = "failed"
+
+
+@dataclass(slots=True)
+class CalibrationProgress:
+    """Progress update emitted while a calibration runs.
+
+    Attributes:
+        phase (CalibrationPhase): Current step.
+        message (str): User-facing instruction or status.
+        speed_kmh (float | None): Current speed (spin-down only).
+        target_low_kmh (float | None): Lower bound of the target speed (spin-down only).
+        target_high_kmh (float | None): Upper bound of the target speed (spin-down only).
+        fraction (float | None): Progress of the current phase in 0-1, if known.
+    """
+
+    phase: CalibrationPhase
+    message: str
+    speed_kmh: float | None = None
+    target_low_kmh: float | None = None
+    target_high_kmh: float | None = None
+    fraction: float | None = None
+
+
+@dataclass(slots=True)
+class CalibrationResult:
+    """Outcome of a successful calibration.
+
+    Attributes:
+        message (str): User-facing summary.
+        offset (int | None): Raw zero offset reported by a power meter, if any.
+    """
+
+    message: str
+    offset: int | None = None
+
+
+class CalibrationError(Exception):
+    """A calibration failed; the message is shown to the user."""
+
+
+ProgressCallback = Callable[[CalibrationProgress], None]
+
+
+class Calibratable(ABC):
+    """Interface for devices that can be calibrated.
+
+    Attributes:
+        CALIBRATION (CalibrationKind): The calibration the device supports.
+    """
+
+    CALIBRATION: ClassVar[CalibrationKind]
+
+    @abstractmethod
+    async def calibrate(self, on_progress: ProgressCallback) -> CalibrationResult:
+        """Run the calibration, reporting progress along the way.
+
+        Args:
+            on_progress (ProgressCallback): Called with every progress update.
+
+        Returns:
+            CalibrationResult: The outcome.
+
+        Raises:
+            CalibrationError: If the calibration fails or is refused.
         """
 
 
