@@ -1,39 +1,22 @@
 name: Release
 
+# Push a tag `vX.Y.Z` (or `vX.Y.Zrc1` for a pre-release) to build the macOS DMGs and
+# attach them to a GitHub Release. "Run workflow" in the Actions tab builds them as
+# downloadable run artifacts only, without creating a release.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
-permissions:
-  contents: write  # attach files to the GitHub Release
-
 jobs:
-  pypi:
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write  # PyPI trusted publishing
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv build
-      - name: Publish (TestPyPI for pre-releases, PyPI otherwise)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          if [[ "$GITHUB_REF_NAME" == *rc* ]]; then
-            uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/
-          else
-            uv publish --trusted-publishing always
-          fi
-
   macos-app:
     strategy:
       matrix:
         runner: [macos-15, macos-15-intel]  # arm64, x86_64
     runs-on: ${{ matrix.runner }}
     env:
-      # secrets can't be tested in `if:` directly
+      # Optional signing/notarization; without these secrets the app is ad-hoc signed.
+      # (secrets can't be tested in `if:` directly)
       HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.NOTARY_KEY != '' }}
     steps:
@@ -63,7 +46,7 @@ jobs:
       - name: Build app and DMG
         env:
           CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
-          NOTARY_KEY_PATH: ${{ secrets.NOTARY_KEY != '' && format('{0}/notary.p8', runner.temp) || '' }}
+          NOTARY_KEY_PATH: ${{ env.HAS_NOTARY == 'true' && format('{0}/notary.p8', runner.temp) || '' }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: packaging/build_macos.sh
@@ -72,10 +55,23 @@ jobs:
         with:
           name: dmg-${{ matrix.runner }}
           path: dist/*.dmg
+          if-no-files-found: error
 
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  # One job creates the release, so the two builds can't race to create it twice.
+  release:
+    needs: macos-app
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dmg-*
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
         with:
           files: dist/*.dmg
           prerelease: ${{ contains(github.ref_name, 'rc') }}
+          generate_release_notes: true

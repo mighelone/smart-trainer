@@ -30,7 +30,15 @@ rm -f "$DMG"
 STAGING=$(mktemp -d)
 cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
-hdiutil create -volname "Smart Trainer" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+# hdiutil sometimes fails with "Resource busy" on CI runners; retry a few times
+for attempt in 1 2 3 4 5; do
+    if hdiutil create -volname "Smart Trainer" -srcfolder "$STAGING" -ov -format UDZO "$DMG"; then
+        break
+    fi
+    [[ $attempt == 5 ]] && { echo "hdiutil failed" >&2; exit 1; }
+    echo "hdiutil failed (attempt $attempt), retrying..." >&2
+    sleep $((attempt * 5))
+done
 rm -rf "$STAGING"
 
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then

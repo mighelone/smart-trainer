@@ -10,24 +10,31 @@ Indoor cycling app for macOS, written in Python. It:
 
 The app runs on your Mac because it talks to your Bluetooth devices. There are two ways to install it:
 
-- **Mac app (easiest):** download `SmartTrainer-<version>-macos-<arm64|x86_64>.dmg` from
-  [Releases](https://github.com/mighelone/smart-trainer/releases), drag **Smart Trainer** to
-  Applications and open it. It opens in its own window; macOS asks for Bluetooth permission on the first scan.
+- **Mac app:** download `SmartTrainer-<version>-macos-arm64.dmg` (Apple Silicon) or
+  `…-macos-x86_64.dmg` (Intel) from [Releases](https://github.com/mighelone/smart-trainer/releases),
+  drag **Smart Trainer** to Applications and open it. It opens in its own window; macOS asks for
+  Bluetooth permission on the first scan.
+
+  The app isn't notarized by Apple, so the first launch is blocked: click **Done**, then go to
+  **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. Or run
+  `xattr -dr com.apple.quarantine "/Applications/Smart Trainer.app"` once.
+  macOS may ask for Bluetooth permission again after an update.
 - **Command line (with [uv](https://docs.astral.sh/uv/)):**
   ```bash
-  uv tool install smart-trainer            # browser UI
-  uv tool install 'smart-trainer[app]'     # adds the desktop window: smart-trainer --native
+  uv tool install git+https://github.com/mighelone/smart-trainer             # browser UI
+  uv tool install 'smart-trainer[app] @ git+https://github.com/mighelone/smart-trainer'  # + desktop window (--native)
   ```
   Bluetooth permission is then granted to your terminal app.
 
 ### Releasing
-Push a tag `vX.Y.Z` (`vX.Y.Zrc1` for a pre-release on TestPyPI). `.github/workflows/release.yml`
-publishes the wheel to PyPI (trusted publishing, `pypi` environment) and attaches arm64 and
-x86_64 DMGs to the GitHub Release. To build the app locally: `packaging/build_macos.sh`.
-Signing and notarization run when the repository secrets `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`,
-`CODESIGN_IDENTITY`, `NOTARY_KEY`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID` are set; without them the DMG
-is ad-hoc signed and Gatekeeper warns (right-click → Open).
-Optional app icon: `packaging/icon.icns`.
+Bump `version` in `pyproject.toml`, commit, then push a tag `vX.Y.Z` (`vX.Y.Zrc1` for a
+pre-release). `.github/workflows/release.yml` builds arm64 and x86_64 DMGs and attaches them to
+the GitHub Release. **Actions → Release → Run workflow** builds them as downloadable run artifacts
+without releasing. To build locally: `packaging/build_macos.sh`.
+
+Signing and notarization are optional and run only when the repository secrets `MACOS_CERT_P12`,
+`MACOS_CERT_PASSWORD`, `CODESIGN_IDENTITY`, `NOTARY_KEY`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`
+are set (needs an Apple Developer account). Optional app icon: `packaging/icon.icns`.
 
 ## Run (from source)
 
