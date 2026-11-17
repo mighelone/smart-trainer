@@ -1,13 +1,16 @@
 # PyInstaller spec for the macOS app. Build with:  packaging/build_macos.sh
 # -*- mode: python ; coding: utf-8 -*-
-import tomllib
+import sys
 from pathlib import Path
 
 import nicegui
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).parent
-VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+sys.path.insert(0, SPECPATH)
+from version import project_version  # noqa: E402  (packaging/version.py)
+
+VERSION = project_version(ROOT)  # from CHANGELOG.md
 ICON = ROOT / "packaging" / "icon.icns"
 
 a = Analysis(
