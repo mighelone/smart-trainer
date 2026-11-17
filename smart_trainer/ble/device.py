@@ -40,11 +40,11 @@ class Device(ABC):
     PRIORITY: ClassVar[int] = 0  # higher wins when a device matches several drivers
     DRIVER: ClassVar[str] = ""
 
-    def __init__(self, address: str, name: str = "") -> None:
+    def __init__(self, address: str, name: str | None = None) -> None:
         """Initialize the device.
 
         Args:
-            address (str): BLE address (or platform UUID on macOS) of the device.
+            address (str|None): BLE address (or platform UUID on macOS) of the device.
             name (str): Human-readable device name; defaults to the address.
         """
         self.address = address

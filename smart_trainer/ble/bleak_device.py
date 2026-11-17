@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from abc import abstractmethod
 
 from bleak import BleakClient
 
@@ -59,13 +60,10 @@ class BleakDevice(Device):
                 self.client = None
         log.info("%s: disconnected", self.name)
 
+    @abstractmethod
     async def on_connected(self, client: BleakClient) -> None:
         """Subscribe to notifications / initialise the device.
 
         Args:
             client (BleakClient): The connected bleak client.
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses.
         """
-        raise NotImplementedError
