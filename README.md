@@ -47,7 +47,9 @@ The first time you scan, macOS asks for Bluetooth permission for your terminal a
 Turn it on in System Settings → Privacy & Security → Bluetooth.
 
 ## First setup
-1. **Settings:** enter your FTP and your intervals.icu API key (intervals.icu → Settings → Developer Settings). The key is stored in the macOS Keychain.
+1. **Settings:** enter your intervals.icu API key (intervals.icu → Settings → Developer Settings). The key is stored in the macOS Keychain.
+   Your FTP (the Ride indoor FTP when set), weight, and power and HR zones are then synced from intervals.icu at every launch and with **Sync now**.
+   To enter FTP and weight by hand instead, turn off *Sync FTP, zones and weight from intervals.icu*.
 2. **Devices:** wake up the devices (pedal a few turns, put on the strap), then press **Scan**.
    - Zwift Hub → *Use as trainer*
    - Assioma → *Use for power*
@@ -59,6 +61,18 @@ Turn it on in System Settings → Privacy & Security → Bluetooth.
    - **ERG** switch: off means resistance mode with the target shown only as a guide.
    - **Power source** *Pedals*: the trainer's ERG target is corrected so your Assioma power hits the target. If the pedals drop out, the app falls back to trainer power.
 5. **Finish:** writes a FIT file and (optionally) uploads it to intervals.icu. Failed uploads can be retried from **History**.
+
+## Calibration
+On **Devices**, press **Calibrate** on a connected device (not available during a ride):
+- **Smart trainer: spin-down** (FTMS). Warm up for ~10 minutes, pedal up to the target speed the
+  trainer asks for, then stop pedalling when told and let the flywheel coast. Trainers that
+  calibrate themselves (or only through their own app) report that they don't support it.
+- **Power meter: zero offset** (Cycling Power "Start Offset Compensation", e.g. Assioma). Unclip,
+  put the cranks vertical with no weight on the pedals, keep still, then press **Start**. The
+  offset reported by the meter is shown.
+
+Trainer control is paused during a spin-down, and rides can't start until it finishes.
+`--fake` simulates both flows.
 
 ## Crash recovery
 Samples are written to SQLite (WAL mode) every second in
@@ -80,6 +94,7 @@ Create a driver subclassing `BleakDevice`:
 - set `SERVICE_UUID`, `ROLES` and `DRIVER`
 - decorate it with `@register`
 - call `self.emit(Reading(...))` with the device's readings
+- optionally implement `Calibratable` (`CALIBRATION` + `calibrate()`) to get a **Calibrate** button
 
 Then import it in `ble/scanner.py`. The core never needs to change.
 

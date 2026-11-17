@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
+from smart_trainer.config import DEFAULT_POWER_ZONES
 from smart_trainer.core.workout import Workout, WorkoutRunner
 
 
@@ -41,29 +42,53 @@ def fmt(v, digits: int = 0, unit: str = "") -> str:
 
 
 class Tile:
-    """A big metric tile: label, value, unit, optional sub-line.
+    """A metric tile with a uniform layout: label, value, unit, zone badge and sub-line.
+
+    Every tile has the same structure (and the sub-line always reserves its space), so
+    tiles in a grid line up regardless of what they currently show. The zone is shown
+    as a colored accent bar and a ``Zn`` badge, keeping the value itself high-contrast.
 
     Attributes:
+        card (ui.element): The tile container.
         value (ui.label): Label showing the main value.
         sub (ui.label): Label showing the secondary line.
+        badge (ui.label): Zone badge, hidden when no zone is known.
     """
 
-    def __init__(self, label: str, unit: str = "", big: bool = False, color: str = "") -> None:
+    def __init__(
+        self,
+        label: str,
+        unit: str = "",
+        icon: str | None = None,
+        size: str = "md",
+        accent: str | None = None,
+    ) -> None:
         """Create the tile in the current UI context.
 
         Args:
             label (str): Metric name shown above the value.
             unit (str): Unit shown next to the value.
-            big (bool): Use a larger font for the value.
-            color (str): Tailwind classes applied to the value (e.g. a text color).
+            icon (str | None): Material icon shown before the label.
+            size (str): ``"lg"`` for primary metrics, ``"md"`` for secondary ones.
+            accent (str | None): Default accent color, used when no zone is set.
         """
-        size = "text-7xl" if big else "text-5xl"
-        with ui.card().classes("items-center min-w-[150px] grow p-3 gap-0"):
-            ui.label(label).classes("text-xs uppercase tracking-widest opacity-60")
-            with ui.row().classes("items-baseline gap-1"):
-                self.value = ui.label("--").classes(f"{size} font-bold tabular-nums {color}")
-                ui.label(unit).classes("text-lg opacity-60")
-            self.sub = ui.label("").classes("text-sm opacity-70 tabular-nums")
+        self._default = accent
+        self._accent: str | None = None
+        self._badge: str | None = None
+        with ui.element("div").classes(f"metric metric-{size}") as self.card:
+            with ui.element("div").classes("metric-head"):
+                with ui.element("div").classes("metric-label"):
+                    if icon:
+                        ui.icon(icon).classes("metric-icon")
+                    ui.label(label)
+                self.badge = ui.label("").classes("metric-badge")
+                self.badge.set_visibility(False)
+            with ui.element("div").classes("metric-body"):
+                self.value = ui.label("--").classes("metric-value")
+                if unit:
+                    ui.label(unit).classes("metric-unit")
+            self.sub = ui.label("").classes("metric-sub")
+        self.set_zone(None)
 
     def set(self, value: str, sub: str = "") -> None:
         """Update the displayed value and sub-line.
@@ -75,31 +100,112 @@ class Tile:
         self.value.set_text(value)
         self.sub.set_text(sub)
 
+    def set_zone(self, color: str | None, badge: str | None = None) -> None:
+        """Show a zone: accent color and badge text (``None`` restores the default).
 
-def zone_color(watts: float | None, ftp: int) -> str:
-    """Color for a power value according to its Coggan power zone.
+        Args:
+            color (str | None): CSS color of the zone.
+            badge (str | None): Badge text, e.g. ``"Z3"``; hidden if ``None``.
+        """
+        accent = color or self._default or "var(--faint)"
+        if accent != self._accent:
+            self._accent = accent
+            self.card.style(f"--accent: {accent}")
+        if badge != self._badge:
+            self._badge = badge
+            self.badge.set_text(badge or "")
+            self.badge.set_visibility(badge is not None)
+
+
+ZONE_COLORS = ("#94a3b8", "#3b82f6", "#22c55e", "#eab308", "#f97316", "#ef4444", "#a855f7")
+NO_ZONE_COLOR = "#64748b"
+
+
+def zone_index(value: float, bounds: list[int] | tuple[int, ...]) -> int:
+    """0-based zone of a value, given ascending zone upper bounds.
+
+    Args:
+        value (float): The value (same unit as ``bounds``).
+        bounds (list[int] | tuple[int, ...]): Zone upper bounds; the last zone is open-ended.
+
+    Returns:
+        int: Zone index, at most ``len(bounds) - 1``.
+    """
+    for i, upper in enumerate(bounds):
+        if value < upper:
+            return i
+    return len(bounds) - 1
+
+
+def _color(i: int) -> str:
+    """Color of the ``i``-th zone (the last color repeats past seven zones)."""
+    return ZONE_COLORS[min(i, len(ZONE_COLORS) - 1)]
+
+
+def zone_color(watts: float | None, ftp: int, zones: list[int] | None = None) -> str:
+    """Color for a power value according to the rider's power zone.
 
     Args:
         watts (float | None): Power in watts.
         ftp (int): Rider's FTP in watts.
+        zones (list[int] | None): Zone upper bounds as % of FTP; ``None`` uses Coggan zones.
 
     Returns:
         str: Hex color string (grey if ``watts`` is ``None``).
     """
-    if watts is None:
-        return "#64748b"
-    r = watts / ftp
-    for limit, color in (
-        (0.55, "#94a3b8"),
-        (0.75, "#3b82f6"),
-        (0.90, "#22c55e"),
-        (1.05, "#eab308"),
-        (1.20, "#f97316"),
-        (9e9, "#ef4444"),
-    ):
-        if r < limit:
-            return color
-    return "#ef4444"
+    if watts is None or ftp <= 0:
+        return NO_ZONE_COLOR
+    return _color(zone_index(watts / ftp * 100, zones or DEFAULT_POWER_ZONES))
+
+
+def hr_zone_color(bpm: float | None, hr_zones: list[int]) -> str | None:
+    """Color for a heart rate according to the rider's HR zones.
+
+    Args:
+        bpm (float | None): Heart rate in bpm.
+        hr_zones (list[int]): HR zone upper bounds in bpm.
+
+    Returns:
+        str | None: Hex color string, or ``None`` if HR or zones are unknown.
+    """
+    if bpm is None or not hr_zones:
+        return None
+    return _color(zone_index(bpm, hr_zones))
+
+
+def power_zone(
+    watts: float | None, ftp: int, zones: list[int] | None = None
+) -> tuple[str | None, str | None]:
+    """Zone color and badge text (e.g. ``"Z3"``) for a power value.
+
+    Args:
+        watts (float | None): Power in watts.
+        ftp (int): Rider's FTP in watts.
+        zones (list[int] | None): Zone upper bounds as % of FTP; ``None`` uses Coggan zones.
+
+    Returns:
+        tuple[str | None, str | None]: ``(color, badge)``, or ``(None, None)`` if unknown.
+    """
+    if watts is None or ftp <= 0:
+        return None, None
+    i = zone_index(watts / ftp * 100, zones or DEFAULT_POWER_ZONES)
+    return _color(i), f"Z{i + 1}"
+
+
+def hr_zone(bpm: float | None, hr_zones: list[int]) -> tuple[str | None, str | None]:
+    """Zone color and badge text (e.g. ``"Z2"``) for a heart rate.
+
+    Args:
+        bpm (float | None): Heart rate in bpm.
+        hr_zones (list[int]): HR zone upper bounds in bpm.
+
+    Returns:
+        tuple[str | None, str | None]: ``(color, badge)``, or ``(None, None)`` if unknown.
+    """
+    if bpm is None or not hr_zones:
+        return None, None
+    i = zone_index(bpm, hr_zones)
+    return _color(i), f"Z{i + 1}"
 
 
 def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live: bool = True):
@@ -122,8 +228,8 @@ def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live:
             "data": [],
             "step": False,
             "showSymbol": False,
-            "lineStyle": {"width": 0},
-            "areaStyle": {"opacity": 0.45, "color": "#3b82f6"},
+            "lineStyle": {"width": 1, "color": "#4f8cff", "opacity": 0.8},
+            "areaStyle": {"opacity": 0.28, "color": "#4f8cff"},
             "z": 1,
         },
         {
@@ -147,22 +253,52 @@ def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live:
     if workout:
         pts = WorkoutRunner(workout, ftp).profile()
         series[0]["data"] = [[t, round(w)] for t, w in pts]
+    muted = "#8a96a3"
+    axis_label = {"color": muted, "fontSize": 11}
     opts = {
         "animation": False,
-        "grid": {"left": 45, "right": 45, "top": 15, "bottom": 25},
-        "tooltip": {"trigger": "axis"},
+        "backgroundColor": "transparent",
+        "textStyle": {"color": muted},
+        "grid": {"left": 42, "right": 42, "top": 22, "bottom": 24},
+        "tooltip": {
+            "trigger": "axis",
+            "backgroundColor": "#19212b",
+            "borderColor": "rgba(255,255,255,0.08)",
+            "textStyle": {"color": "#e8edf2"},
+        },
         "xAxis": {
             "type": "value",
             "min": 0,
             "max": total,
-            "axisLabel": {":formatter": 'v => Math.floor(v / 60) + "\'"'},
+            "axisLabel": {**axis_label, ":formatter": 'v => Math.floor(v / 60) + "\'"'},
+            "axisLine": {"lineStyle": {"color": "rgba(255,255,255,0.12)"}},
+            "axisTick": {"show": False},
             "splitLine": {"show": False},
         },
         "yAxis": [
-            {"type": "value", "name": "W", "min": 0, "splitLine": {"lineStyle": {"opacity": 0.15}}},
-            {"type": "value", "name": "bpm", "min": 60, "max": 200, "splitLine": {"show": False}},
+            {
+                "type": "value",
+                "name": "W",
+                "min": 0,
+                "nameTextStyle": axis_label,
+                "axisLabel": axis_label,
+                "splitLine": {"lineStyle": {"color": "rgba(255,255,255,0.06)"}},
+            },
+            {
+                "type": "value",
+                "name": "bpm",
+                "min": 60,
+                "max": 200,
+                "nameTextStyle": axis_label,
+                "axisLabel": axis_label,
+                "splitLine": {"show": False},
+            },
         ],
         "series": series if live else series[:1],
     }
+    if not live:  # compact preview: power axis only, no gridlines
+        opts["yAxis"] = opts["yAxis"][:1]
+        opts["yAxis"][0].update(name="", splitNumber=2, splitLine={"show": False})
+        opts["grid"].update(top=8, right=12)
     chart = ui.echart(opts).classes(f"w-full {height}")
     return chart

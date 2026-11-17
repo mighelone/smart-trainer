@@ -116,13 +116,39 @@ class Workout:
 
 
 # --------------------------------------------------------------- intervals.icu
-def _icu_power(p: dict | None, ftp: int) -> tuple[float, float | None, str] | None:
+def zone_mid(zone: int, zones: list[int] | None = None) -> float:
+    """Representative target for a power zone, as a fraction of FTP.
+
+    Args:
+        zone (int): 1-based zone number.
+        zones (list[int] | None): Zone upper bounds as % of FTP (the last zone is
+            open-ended). ``None`` uses the default Coggan midpoints.
+
+    Returns:
+        float: Target as a fraction of FTP.
+    """
+    if not zones:
+        return ZONE_MID.get(zone, 0.6)
+    i = min(max(zone, 1), len(zones)) - 1
+    lower = zones[i - 1] / 100.0 if i > 0 else None
+    upper = zones[i] / 100.0
+    if lower is None:  # Z1 starts at 0: aim near its top, not at 0.5 * upper
+        return 0.9 * upper
+    if i == len(zones) - 1:  # open-ended top zone
+        return lower + 0.10
+    return (lower + upper) / 2
+
+
+def _icu_power(
+    p: dict | None, ftp: int, zones: list[int] | None = None
+) -> tuple[float, float | None, str] | None:
     """Convert an intervals.icu power target into step target values.
 
     Args:
         p (dict | None): intervals.icu power target (``units``, ``value`` or
             ``start``/``end``).
         ftp (int): Rider's functional threshold power in watts.
+        zones (list[int] | None): Rider's power zone upper bounds (% of FTP).
 
     Returns:
         tuple[float, float | None, str] | None: ``(start, end, unit)`` tuple, or
@@ -140,14 +166,18 @@ def _icu_power(p: dict | None, ftp: int) -> tuple[float, float | None, str] | No
     if units in ("w", "watts"):
         return float(start), (float(end) if end is not None else None), "watts"
     if units in ("power_zone", "zone"):
-        s = ZONE_MID.get(int(round(start)), 0.6)
-        e = ZONE_MID.get(int(round(end)), s) if end is not None else None
+        s = zone_mid(int(round(start)), zones)
+        e = zone_mid(int(round(end)), zones) if end is not None else None
         return s, e, "ftp"
     return None
 
 
 def parse_intervals_doc(
-    doc: dict, name: str = "Workout", ftp: int = 250, source_id: str | None = None
+    doc: dict,
+    name: str = "Workout",
+    ftp: int = 250,
+    source_id: str | None = None,
+    zones: list[int] | None = None,
 ) -> Workout:
     """Parse an intervals.icu ``workout_doc`` into a workout.
 
@@ -159,6 +189,8 @@ def parse_intervals_doc(
         name (str): Name to give the workout.
         ftp (int): Rider's functional threshold power in watts.
         source_id (str | None): intervals.icu event id, if any.
+        zones (list[int] | None): Rider's power zone upper bounds (% of FTP), used
+            for zone targets; ``None`` uses the default Coggan zones.
 
     Returns:
         Workout: The parsed workout.
@@ -182,7 +214,7 @@ def parse_intervals_doc(
             dur = int(it.get("duration") or 0)
             if dur <= 0:
                 continue
-            pw = _icu_power(it.get("power"), ftp)
+            pw = _icu_power(it.get("power"), ftp, zones)
             cad = it.get("cadence", {}) or {}
             cadence = cad.get("value") or cad.get("start")
             text = it.get("text") or ""

@@ -10,6 +10,26 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Added
+- Calibration from the **Devices** page, with step-by-step guidance, live progress and the result:
+  - smart trainer spin-down over the FTMS Control Point (target speed, "stop pedalling" prompt,
+    spin-down status);
+  - power meter zero offset (Cycling Power "Start Offset Compensation", e.g. Favero Assioma),
+    showing the offset the meter reports.
+  Calibration is disabled during a ride, trainer control pauses during a spin-down, and `--fake`
+  simulates both flows.
+- Rider profile sync from intervals.icu: FTP (the Ride indoor FTP when set), weight, power and
+  HR zones, LTHR and max HR. It runs at launch and from **Settings → Sync now**. Synced fields
+  are read-only; turn the switch off to enter them by hand. Rides in progress are never changed.
+- Zone targets in intervals.icu workouts use your own power zones.
+- Power, target and heart-rate tiles on the ride screen show the current zone as a coloured
+  accent and a `Z1`–`Z7` badge.
+
+### Changed
+- Redesigned UI: a consistent dark theme across all pages, and ride-screen metric tiles that
+  share one layout (icon, label, value, unit, detail line) in an equal-width grid. Values stay
+  white for readability; the current interval shows a progress bar and the next step.
+
 ## [0.1.0] - 2026-11-17
 
 ### Added

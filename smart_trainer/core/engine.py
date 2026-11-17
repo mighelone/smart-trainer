@@ -15,7 +15,15 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from smart_trainer.ble.device import ControllableTrainer, Device
+from smart_trainer.ble.device import (
+    Calibratable,
+    CalibrationError,
+    CalibrationPhase,
+    CalibrationProgress,
+    CalibrationResult,
+    ControllableTrainer,
+    Device,
+)
 from smart_trainer.config import PairedDevice, Settings, get_api_key, sessions_dir
 from smart_trainer.core.control import Mode, TrainerController
 from smart_trainer.core.recorder import Recorder, SessionInfo, find_unfinished
@@ -79,6 +87,8 @@ class Engine:
         history (deque[HistoryPoint]): Points for the live chart.
         messages (deque[str]): User-facing status messages.
         last_fit (Path | None): Path of the last exported FIT file.
+        calibrating_id (str | None): Id of the device being calibrated, if any.
+        calibration (CalibrationProgress | None): Latest progress of the last calibration.
     """
 
     def __init__(
@@ -109,6 +119,8 @@ class Engine:
         self.history: deque[HistoryPoint] = deque(maxlen=3 * 3600)
         self.messages: deque[str] = deque(maxlen=20)
         self.last_fit: Path | None = None
+        self.calibrating_id: str | None = None
+        self.calibration: CalibrationProgress | None = None
         self._last_step: int | None = None
         self._task: asyncio.Task | None = None
         self._apply_assignment()
@@ -276,6 +288,8 @@ class Engine:
             self.history.append(
                 HistoryPoint(self.ride_seconds, snap.power, snap.hr, snap.cadence, target)
             )
+        if self.calibrating_id is not None and self.calibrating_id == self.selector.trainer_id:
+            return  # never send resistance commands while the trainer spins down
         pedal_avg = self.selector.avg_power(self.selector.assignment.get(Role.POWER))
         trainer_avg = self.selector.avg_power(self.selector.trainer_id)
         await self.controller.apply(
@@ -296,6 +310,81 @@ class Engine:
         elif self.controller.mode == Mode.ERG:
             self.controller.set_mode(Mode.RESISTANCE)
 
+    # -------------------------------------------------------------- calibration
+    def calibration_blocker(self, device_id: str) -> str | None:
+        """Why a device can't be calibrated right now.
+
+        Args:
+            device_id (str): Id of the device to calibrate.
+
+        Returns:
+            str | None: A user-facing reason, or ``None`` if calibration can start.
+        """
+        dev = self.devices.get(device_id)
+        if not isinstance(dev, Calibratable):
+            return "This device does not support calibration."
+        if self.state != RideState.IDLE:
+            return "Finish the ride before calibrating."
+        if self.calibrating_id is not None:
+            return "A calibration is already running."
+        if dev.state != ConnState.CONNECTED:
+            return "The device is not connected."
+        return None
+
+    async def calibrate(self, device_id: str) -> CalibrationResult:
+        """Calibrate a device; progress is published in :attr:`calibration`.
+
+        Trainer control is suspended while the trainer itself is calibrating, and
+        rides can't start until it finishes.
+
+        Args:
+            device_id (str): Id of the device to calibrate.
+
+        Returns:
+            CalibrationResult: The outcome.
+
+        Raises:
+            CalibrationError: If calibration is not possible now or fails.
+        """
+        reason = self.calibration_blocker(device_id)
+        if reason:
+            raise CalibrationError(reason)
+        dev = self.devices[device_id]
+        assert isinstance(dev, Calibratable)
+
+        def on_progress(p: CalibrationProgress) -> None:
+            """Publish a progress update.
+
+            Args:
+                p (CalibrationProgress): The update.
+            """
+            self.calibration = p
+
+        self.calibrating_id = device_id
+        self.calibration = CalibrationProgress(CalibrationPhase.STARTING, "Starting…")
+        try:
+            result = await dev.calibrate(on_progress)
+        except CalibrationError as exc:
+            self.calibration = CalibrationProgress(CalibrationPhase.FAILED, str(exc))
+            self.messages.append(f"{dev.name}: calibration failed")
+            raise
+        except asyncio.CancelledError:
+            self.calibration = CalibrationProgress(
+                CalibrationPhase.FAILED, "Calibration cancelled."
+            )
+            raise
+        except Exception as exc:
+            log.exception("%s: calibration failed", dev.name)
+            msg = f"Calibration failed: {exc or type(exc).__name__}"
+            self.calibration = CalibrationProgress(CalibrationPhase.FAILED, msg)
+            raise CalibrationError(msg) from exc
+        finally:
+            self.calibrating_id = None
+            self.controller.force_resend()
+        self.calibration = CalibrationProgress(CalibrationPhase.DONE, result.message, fraction=1.0)
+        self.messages.append(f"{dev.name}: {result.message}")
+        return result
+
     # ------------------------------------------------------------------- riding
     def current_target(self) -> float | None:
         """Current workout target power.
@@ -310,7 +399,11 @@ class Engine:
 
         Args:
             workout (Workout | None): Workout to ride, or ``None`` for a free ride.
+
+        Raises:
+            RuntimeError: If a calibration is running.
         """
+        self._check_not_calibrating()
         name = workout.name if workout else f"Free ride {datetime.now():%d %b}"
         self.recorder = Recorder.create(self.sessions, name, self.settings.ftp, workout)
         self.runner = (
@@ -323,7 +416,11 @@ class Engine:
 
         Args:
             info (SessionInfo): The unfinished session to resume.
+
+        Raises:
+            RuntimeError: If a calibration is running.
         """
+        self._check_not_calibrating()
         self.recorder = Recorder.open(info.path)
         self.runner = (
             WorkoutRunner(info.workout, info.ftp, info.elapsed_s)
@@ -340,6 +437,15 @@ class Engine:
             )
         self.ride_seconds = active
         self._begin(resumed=True)
+
+    def _check_not_calibrating(self) -> None:
+        """Refuse to ride while a device is being calibrated.
+
+        Raises:
+            RuntimeError: If a calibration is running.
+        """
+        if self.calibrating_id is not None:
+            raise RuntimeError("Wait for the calibration to finish before riding.")
 
     def _begin(self, resumed: bool = False) -> None:
         """Enter the riding state.
@@ -468,6 +574,59 @@ class Engine:
             return False
         finally:
             await client.aclose()
+
+    async def sync_profile(self) -> list[str] | None:
+        """Update FTP, weight and zones from intervals.icu and save the settings.
+
+        Skipped during a ride, so the ride keeps the FTP it started with.
+
+        Returns:
+            list[str] | None: Labels of the changed fields, or ``None`` if the sync
+            didn't happen (a message explains why).
+        """
+        if self.settings._readonly:
+            self.messages.append("Demo mode: profile sync is disabled")
+            return None
+        if self.state != RideState.IDLE:
+            self.messages.append("Profile sync skipped during a ride")
+            return None
+        key = get_api_key()
+        if not key:
+            self.messages.append("No intervals.icu API key: profile not synced")
+            return None
+        from smart_trainer.sync.intervals import IntervalsClient
+
+        log.info(
+            "syncing profile from intervals.icu (athlete %s)", self.settings.intervals_athlete_id
+        )
+        client = IntervalsClient(key, self.settings.intervals_athlete_id)
+        try:
+            profile = await client.profile()
+        except Exception as exc:
+            log.warning("profile sync failed: %s", exc)
+            self.messages.append(f"Profile sync failed: {exc}")
+            return None
+        finally:
+            await client.aclose()
+        if self.state != RideState.IDLE:  # a ride started while we were waiting
+            self.messages.append("Profile sync skipped during a ride")
+            return None
+        changed = profile.apply(self.settings)
+        self.settings.profile_synced_at = time.time()
+        self.settings.save()
+        st = self.settings
+        log.info(
+            "profile synced from intervals.icu: FTP %s W, weight %s kg, power zones %s, "
+            "HR zones %s, LTHR %s, max HR %s (changed: %s)",
+            st.ftp,
+            st.weight_kg,
+            st.power_zones,
+            st.hr_zones,
+            st.lthr,
+            st.max_hr,
+            ", ".join(changed) or "nothing",
+        )
+        return changed
 
     async def finish_crashed(self, info: SessionInfo, upload: bool | None = None) -> Path | None:
         """Finalize a crashed session without resuming it.
