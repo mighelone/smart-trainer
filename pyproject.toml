@@ -2,7 +2,18 @@
 name = "smart-trainer"
 version = "0.1.0"
 description = "Indoor cycling smart-trainer app (BLE FTMS, power meter, HR) with intervals.icu sync"
+readme = "README.md"
 requires-python = ">=3.12"
+authors = [{ name = "Michele Vascellari" }]
+keywords = ["cycling", "smart-trainer", "ftms", "bluetooth", "intervals.icu", "nicegui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+]
 dependencies = [
     "bleak>=0.22",
     "nicegui>=2.0",
@@ -11,6 +22,14 @@ dependencies = [
     "pydantic>=2.7",
     "keyring>=25",
 ]
+
+[project.optional-dependencies]
+# Desktop window (pywebview) instead of a browser tab: `smart-trainer --native`
+app = ["nicegui[native]>=2.0"]
+
+[project.urls]
+Homepage = "https://github.com/mighelone/smart-trainer"
+Issues = "https://github.com/mighelone/smart-trainer/issues"
 
 [project.scripts]
 smart-trainer = "smart_trainer.main:run"
@@ -24,6 +43,14 @@ dev = [
     "pyrefly>=1.4.1",
     "prek>=0.5.10",
 ]
+# Builds the macOS .app (see packaging/)
+package = [
+    "pyinstaller>=6.10",
+    "nicegui[native]>=2.0",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["smart_trainer", "tests", "README.md"]
 
 [build-system]
 requires = ["hatchling"]
