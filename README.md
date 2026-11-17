@@ -27,8 +27,9 @@ The app runs on your Mac because it talks to your Bluetooth devices. There are t
   Bluetooth permission is then granted to your terminal app.
 
 ### Releasing
-Bump `version` in `pyproject.toml`, commit, then push a tag `vX.Y.Z` (`vX.Y.Zrc1` for a
-pre-release). `.github/workflows/release.yml` builds the Apple Silicon DMG and attaches it to
+The version comes from [CHANGELOG.md](CHANGELOG.md): rename `## [Unreleased]` to
+`## [X.Y.Z] - YYYY-MM-DD`, commit, then push a matching tag `vX.Y.Z` (`vX.Y.Zrc1` for a
+pre-release). The release build fails if the tag doesn't match the changelog version. `.github/workflows/release.yml` builds the Apple Silicon DMG and attaches it to
 the GitHub Release. **Actions → Release → Run workflow** builds it as a downloadable run artifact
 without releasing. To build locally: `packaging/build_macos.sh`.
 

@@ -1,13 +1,14 @@
 # PyInstaller spec for the macOS app. Build with:  packaging/build_macos.sh
 # -*- mode: python ; coding: utf-8 -*-
-import tomllib
+from importlib.metadata import version
 from pathlib import Path
 
 import nicegui
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).parent
-VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+# Dynamic version (from CHANGELOG.md via hatch), read from the installed package metadata
+VERSION = version("smart-trainer")
 ICON = ROOT / "packaging" / "icon.icns"
 
 a = Analysis(

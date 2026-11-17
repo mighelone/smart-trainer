@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 (`[Unreleased]` is skipped). To release, rename `[Unreleased]` to the new version and date, then
 push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-17
 
 ### Added
 - Calibration from the **Devices** page, with step-by-step guidance, live progress and the result:
@@ -40,5 +40,6 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 - Mac app (Apple Silicon) as a DMG, built and attached to GitHub Releases by the release workflow.
 - Installation guide ([INSTALL.md](INSTALL.md)).
 
-[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.2.0...HEAD
 [0.1.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.1.0
+[0.2.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.2.0

@@ -9,10 +9,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="dist/Smart Trainer.app"
-VERSION=$(uv run --no-sync python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+uv sync --group package
+# Dynamic version (from CHANGELOG.md via hatch), read from the installed package metadata
+VERSION=$(uv run --no-sync python -c 'from importlib.metadata import version; print(version("smart-trainer"))')
 DMG="dist/SmartTrainer-${VERSION}-macos-$(uname -m).dmg"
 
-uv sync --group package
+# On a tag build, refuse to release if the tag doesn't match the changelog version
+if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" != "v${VERSION}" ]]; then
+    echo "Tag ${GITHUB_REF_NAME} does not match version ${VERSION} from CHANGELOG.md" >&2
+    exit 1
+fi
+
 uv run --no-sync pyinstaller --noconfirm --clean packaging/smart_trainer.spec
 
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
