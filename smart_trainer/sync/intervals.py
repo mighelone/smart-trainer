@@ -9,10 +9,64 @@ from pathlib import Path
 import httpx
 
 from smart_trainer.core.workout import parse_intervals_doc, parse_zwo
-from smart_trainer.sync.base import PlannedWorkout
+from smart_trainer.sync.base import AthleteProfile, PlannedWorkout
 
 log = logging.getLogger(__name__)
 BASE_URL = "https://intervals.icu/api/v1"
+
+
+def _ride_settings(athlete: dict) -> dict:
+    """Pick the cycling entry of the athlete's ``sportSettings``.
+
+    Args:
+        athlete (dict): intervals.icu athlete JSON object.
+
+    Returns:
+        dict: The Ride (else VirtualRide, else first) sport settings, or ``{}``.
+    """
+    sports = [s for s in athlete.get("sportSettings") or [] if isinstance(s, dict)]
+    for wanted in ("Ride", "VirtualRide"):
+        for s in sports:
+            if wanted in (s.get("types") or []):
+                return s
+    return sports[0] if sports else {}
+
+
+def _int_list(values) -> list[int]:
+    """Convert a JSON list to ints, or ``[]`` if it isn't a list of numbers."""
+    try:
+        return [int(round(v)) for v in values or []]
+    except TypeError, ValueError:
+        return []
+
+
+def _pos_int(value) -> int | None:
+    """Convert a JSON number to a positive int, else ``None``."""
+    return int(round(value)) if isinstance(value, int | float) and value > 0 else None
+
+
+def parse_profile(athlete: dict) -> AthleteProfile:
+    """Extract the rider profile from an intervals.icu athlete object.
+
+    FTP is the Ride ``indoor_ftp`` when set (this is an indoor app), else ``ftp``.
+
+    Args:
+        athlete (dict): intervals.icu athlete JSON object.
+
+    Returns:
+        AthleteProfile: The profile; unknown values are ``None``/empty.
+    """
+    ride = _ride_settings(athlete)
+    weight = athlete.get("icu_weight")
+    return AthleteProfile(
+        ftp=_pos_int(ride.get("indoor_ftp")) or _pos_int(ride.get("ftp")),
+        weight_kg=float(weight) if isinstance(weight, int | float) and weight > 0 else None,
+        power_zones=_int_list(ride.get("power_zones")),
+        power_zone_names=[str(n) for n in ride.get("power_zone_names") or []],
+        hr_zones=_int_list(ride.get("hr_zones")),
+        lthr=_pos_int(ride.get("lthr")),
+        max_hr=_pos_int(ride.get("max_hr")),
+    )
 
 
 class IntervalsError(RuntimeError):
@@ -84,7 +138,17 @@ class IntervalsClient:
         """
         return (await self._request("GET", f"/athlete/{self.athlete_id}")).json()
 
-    async def list_workouts(self, oldest: date, newest: date, ftp: int) -> list[PlannedWorkout]:
+    async def profile(self) -> AthleteProfile:
+        """Fetch the rider's profile (FTP, weight, zones).
+
+        Returns:
+            AthleteProfile: The rider profile.
+        """
+        return parse_profile(await self.athlete())
+
+    async def list_workouts(
+        self, oldest: date, newest: date, ftp: int, zones: list[int] | None = None
+    ) -> list[PlannedWorkout]:
         """List planned ride workouts in a date range.
 
         Events without a structured ``workout_doc`` fall back to the ``.zwo`` download.
@@ -93,6 +157,7 @@ class IntervalsClient:
             oldest (date): First day of the range (inclusive).
             newest (date): Last day of the range (inclusive).
             ftp (int): Rider's FTP in watts, used to resolve targets.
+            zones (list[int] | None): Rider's power zone upper bounds (% of FTP).
 
         Returns:
             list[PlannedWorkout]: Planned workouts sorted by day.
@@ -112,7 +177,7 @@ class IntervalsClient:
                 continue
             name = ev.get("name") or "Workout"
             doc = ev.get("workout_doc") or {}
-            wo = parse_intervals_doc(doc, name=name, ftp=ftp, source_id=str(ev["id"]))
+            wo = parse_intervals_doc(doc, name=name, ftp=ftp, source_id=str(ev["id"]), zones=zones)
             if not wo.steps:
                 wo = await self._download_zwo(ev["id"], name)
             if wo is None or not wo.steps:

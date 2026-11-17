@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 
@@ -10,13 +11,14 @@ from nicegui import app, native, ui
 
 from smart_trainer.ble import fake
 from smart_trainer.ble.scanner import make_device
-from smart_trainer.config import APP_DIR, Settings
+from smart_trainer.config import APP_DIR, Settings, get_api_key
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
 from smart_trainer.ui import pages  # noqa: F401  (registers the pages)
 from smart_trainer.ui.pages import S
 
 log = logging.getLogger("smart_trainer")
+_background: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
 
 
 def _startup(use_fake: bool) -> None:
@@ -49,6 +51,10 @@ def _startup(use_fake: bool) -> None:
                 log.warning("unknown driver %s for %s", pd.driver, pd.name)
     engine.start()
     log.info("engine started (data dir: %s)", APP_DIR)
+    if not use_fake and settings.sync_profile and get_api_key():
+        # In the background: a slow or failing network must not block launch
+        _background.add(task := asyncio.create_task(engine.sync_profile()))
+        task.add_done_callback(_background.discard)
 
 
 def run() -> None:

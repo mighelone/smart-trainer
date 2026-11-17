@@ -575,6 +575,59 @@ class Engine:
         finally:
             await client.aclose()
 
+    async def sync_profile(self) -> list[str] | None:
+        """Update FTP, weight and zones from intervals.icu and save the settings.
+
+        Skipped during a ride, so the ride keeps the FTP it started with.
+
+        Returns:
+            list[str] | None: Labels of the changed fields, or ``None`` if the sync
+            didn't happen (a message explains why).
+        """
+        if self.settings._readonly:
+            self.messages.append("Demo mode: profile sync is disabled")
+            return None
+        if self.state != RideState.IDLE:
+            self.messages.append("Profile sync skipped during a ride")
+            return None
+        key = get_api_key()
+        if not key:
+            self.messages.append("No intervals.icu API key: profile not synced")
+            return None
+        from smart_trainer.sync.intervals import IntervalsClient
+
+        log.info(
+            "syncing profile from intervals.icu (athlete %s)", self.settings.intervals_athlete_id
+        )
+        client = IntervalsClient(key, self.settings.intervals_athlete_id)
+        try:
+            profile = await client.profile()
+        except Exception as exc:
+            log.warning("profile sync failed: %s", exc)
+            self.messages.append(f"Profile sync failed: {exc}")
+            return None
+        finally:
+            await client.aclose()
+        if self.state != RideState.IDLE:  # a ride started while we were waiting
+            self.messages.append("Profile sync skipped during a ride")
+            return None
+        changed = profile.apply(self.settings)
+        self.settings.profile_synced_at = time.time()
+        self.settings.save()
+        st = self.settings
+        log.info(
+            "profile synced from intervals.icu: FTP %s W, weight %s kg, power zones %s, "
+            "HR zones %s, LTHR %s, max HR %s (changed: %s)",
+            st.ftp,
+            st.weight_kg,
+            st.power_zones,
+            st.hr_zones,
+            st.lthr,
+            st.max_hr,
+            ", ".join(changed) or "nothing",
+        )
+        return changed
+
     async def finish_crashed(self, info: SessionInfo, upload: bool | None = None) -> Path | None:
         """Finalize a crashed session without resuming it.
 
