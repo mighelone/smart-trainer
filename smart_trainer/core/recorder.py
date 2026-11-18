@@ -5,17 +5,26 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Workout
 
-SCHEMA = """
+UPLOADS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS uploads (
+    connection TEXT PRIMARY KEY,       -- connection id (intervals, strava, ...)
+    remote_id TEXT,                    -- activity id once uploaded
+    error TEXT,                        -- last error, if the upload failed
+    updated_at REAL NOT NULL
+);
+"""
+SCHEMA = (
+    """
 CREATE TABLE IF NOT EXISTS session (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    status TEXT NOT NULL,              -- active | finished | uploaded
+    status TEXT NOT NULL,              -- active | finished (legacy: uploaded)
     started_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     name TEXT NOT NULL,
@@ -23,7 +32,7 @@ CREATE TABLE IF NOT EXISTS session (
     workout_json TEXT,
     elapsed_s REAL NOT NULL DEFAULT 0, -- active workout seconds (for resume)
     mode TEXT,
-    upload_id TEXT,
+    upload_id TEXT,                    -- legacy (intervals.icu only), see uploads
     upload_error TEXT
 );
 CREATE TABLE IF NOT EXISTS samples (
@@ -36,6 +45,30 @@ CREATE TABLE IF NOT EXISTS samples (
     target REAL, balance_left REAL
 );
 """
+    + UPLOADS_SCHEMA
+)
+
+
+@dataclass
+class UploadState:
+    """Outcome of uploading a session to one connection.
+
+    Attributes:
+        remote_id (str | None): Activity id on the platform once uploaded.
+        error (str | None): Last error message, if the upload failed.
+    """
+
+    remote_id: str | None = None
+    error: str | None = None
+
+    @property
+    def done(self) -> bool:
+        """Whether the upload succeeded.
+
+        Returns:
+            bool: ``True`` if uploaded.
+        """
+        return bool(self.remote_id)
 
 
 @dataclass
@@ -44,16 +77,15 @@ class SessionInfo:
 
     Attributes:
         path (Path): Path of the session SQLite file.
-        status (str): ``"active"``, ``"finished"`` or ``"uploaded"``.
+        status (str): ``"active"`` or ``"finished"``.
         name (str): Session name.
         started_at (float): Unix time the session started.
         updated_at (float): Unix time of the last recorded sample.
         ftp (int): FTP used for the session, in watts.
         elapsed_s (float): Active workout seconds (for resume).
         workout (Workout | None): Workout being ridden, if any.
-        upload_id (str | None): intervals.icu activity id once uploaded.
-        upload_error (str | None): Last upload error message, if any.
         n_samples (int): Number of recorded samples.
+        uploads (dict[str, UploadState]): Upload outcome by connection id.
     """
 
     path: Path
@@ -64,9 +96,20 @@ class SessionInfo:
     ftp: int
     elapsed_s: float
     workout: Workout | None
-    upload_id: str | None
-    upload_error: str | None
     n_samples: int
+    uploads: dict[str, UploadState] = field(default_factory=dict)
+
+    def uploaded(self, conn_id: str) -> bool:
+        """Whether the session was uploaded to a connection.
+
+        Args:
+            conn_id (str): Connection id.
+
+        Returns:
+            bool: ``True`` if uploaded.
+        """
+        state = self.uploads.get(conn_id)
+        return bool(state and state.done)
 
     @property
     def started(self) -> datetime:
@@ -220,11 +263,28 @@ class Recorder:
         """Update the session status and optional extra columns.
 
         Args:
-            status (str): New status (``"active"``, ``"finished"`` or ``"uploaded"``).
-            **fields (Any): Additional session columns to set (e.g. ``upload_id``).
+            status (str): New status (``"active"`` or ``"finished"``).
+            **fields (Any): Additional session columns to set.
         """
         sets = ", ".join(["status=?"] + [f"{k}=?" for k in fields])
         self.con.execute(f"UPDATE session SET {sets} WHERE id=1", (status, *fields.values()))
+
+    def set_upload(
+        self, conn_id: str, remote_id: str | None = None, error: str | None = None
+    ) -> None:
+        """Record the outcome of an upload to a connection.
+
+        Args:
+            conn_id (str): Connection id.
+            remote_id (str | None): Activity id if the upload succeeded.
+            error (str | None): Error message if it failed.
+        """
+        self.con.executescript(UPLOADS_SCHEMA)  # sessions recorded before uploads existed
+        self.con.execute(
+            "INSERT OR REPLACE INTO uploads (connection, remote_id, error, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (conn_id, remote_id, error, time.time()),
+        )
 
     def close(self) -> None:
         """Close the database connection."""
@@ -266,20 +326,40 @@ def read_info(path: Path, con: sqlite3.Connection | None = None) -> SessionInfo:
         wo = Workout.from_dict(json.loads(r["workout_json"])) if r["workout_json"] else None
         return SessionInfo(
             path,
-            r["status"],
+            "finished" if r["status"] == "uploaded" else r["status"],
             r["name"],
             r["started_at"],
             r["updated_at"],
             r["ftp"],
             r["elapsed_s"],
             wo,
-            r["upload_id"],
-            r["upload_error"],
             n,
+            _read_uploads(con, r),
         )
     finally:
         if own:
             con.close()
+
+
+def _read_uploads(con: sqlite3.Connection, session: sqlite3.Row) -> dict[str, UploadState]:
+    """Read the upload outcomes, including the legacy intervals.icu-only columns.
+
+    Args:
+        con (sqlite3.Connection): Open session database.
+        session (sqlite3.Row): The session row.
+
+    Returns:
+        dict[str, UploadState]: Upload outcome by connection id.
+    """
+    out: dict[str, UploadState] = {}
+    try:
+        for u in con.execute("SELECT connection, remote_id, error FROM uploads"):
+            out[u["connection"]] = UploadState(u["remote_id"], u["error"])
+    except sqlite3.OperationalError:  # older session file without the uploads table
+        pass
+    if "intervals" not in out and (session["upload_id"] or session["upload_error"]):
+        out["intervals"] = UploadState(session["upload_id"], session["upload_error"])
+    return out
 
 
 def list_sessions(directory: Path) -> list[SessionInfo]:

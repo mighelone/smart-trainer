@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 log = logging.getLogger(__name__)
 
@@ -55,20 +57,37 @@ class PowerMatch(BaseModel):
     min_cadence: float = 40.0
 
 
+class ConnectionSettings(BaseModel):
+    """User settings of one connection (intervals.icu, Strava, …).
+
+    Secrets (API keys, tokens) are never stored here: they live in the keyring.
+
+    Attributes:
+        enabled (bool): Whether the connection is used at all.
+        auto_upload (bool): Include this connection in the automatic upload after a ride.
+        options (dict[str, Any]): Non-secret, connection-specific options
+            (e.g. intervals.icu ``athlete_id``, Strava ``client_id``).
+    """
+
+    enabled: bool = True
+    auto_upload: bool = True
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
 class Settings(BaseModel):
     """Application settings persisted as JSON.
 
     Attributes:
         ftp (int): Functional threshold power in watts.
         weight_kg (float): Rider weight in kilograms.
-        intervals_athlete_id (str): intervals.icu athlete id; ``"0"`` means the
-            athlete that owns the API key.
         power_source (str): Preferred power source, ``"pedals"`` or ``"trainer"``.
         devices (dict[str, PairedDevice]): Paired devices by device id.
         role_assignment (dict[str, str]): Device id assigned to each role.
         power_match (PowerMatch): Pedal power matching parameters.
-        auto_upload (bool): Upload finished rides to intervals.icu automatically.
-        sync_profile (bool): Keep FTP, weight and zones in sync with intervals.icu.
+        auto_upload (bool): Upload finished rides automatically (to every connection
+            that has its own ``auto_upload`` on).
+        sync_profile (bool): Keep FTP, weight and zones in sync with the profile connection.
+        connections (dict[str, ConnectionSettings]): Settings of each connection by id.
         power_zones (list[int]): Power zone upper bounds as % of FTP (last is open-ended).
         power_zone_names (list[str]): Power zone names.
         hr_zones (list[int]): Heart-rate zone upper bounds in bpm.
@@ -79,7 +98,6 @@ class Settings(BaseModel):
 
     ftp: int = 250
     weight_kg: float = 75.0
-    intervals_athlete_id: str = "0"  # "0" = the athlete that owns the API key
     power_source: str = "pedals"  # "pedals" | "trainer"
     devices: dict[str, PairedDevice] = Field(default_factory=dict)  # device id -> paired device
     role_assignment: dict[str, str] = Field(default_factory=dict)  # role -> device id
@@ -92,7 +110,40 @@ class Settings(BaseModel):
     lthr: int | None = None
     max_hr: int | None = None
     profile_synced_at: float | None = None
+    connections: dict[str, ConnectionSettings] = Field(default_factory=dict)
     _readonly: bool = PrivateAttr(default=False)  # demo mode: never write config
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate(cls, data: Any) -> Any:
+        """Move pre-connections fields (``intervals_athlete_id``) into ``connections``.
+
+        Args:
+            data (Any): Raw input data.
+
+        Returns:
+            Any: The migrated data.
+        """
+        if isinstance(data, dict) and "intervals_athlete_id" in data:
+            data = dict(data)
+            athlete = data.pop("intervals_athlete_id")
+            conns = dict(data.get("connections") or {})
+            iv = dict(conns.get("intervals") or {})
+            iv.setdefault("options", {}).setdefault("athlete_id", athlete)
+            conns["intervals"] = iv
+            data["connections"] = conns
+        return data
+
+    def connection(self, conn_id: str) -> ConnectionSettings:
+        """Get the settings of a connection, adding the defaults if missing.
+
+        Args:
+            conn_id (str): Connection id.
+
+        Returns:
+            ConnectionSettings: The (mutable) connection settings.
+        """
+        return self.connections.setdefault(conn_id, ConnectionSettings())
 
     @classmethod
     def path(cls) -> Path:
@@ -138,6 +189,59 @@ def sessions_dir() -> Path:
     d = APP_DIR / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _secret_env(conn_id: str, name: str) -> str:
+    """Environment variable that overrides a secret, e.g. ``SMART_TRAINER_STRAVA_CLIENT_SECRET``."""
+    return re.sub(r"[^A-Z0-9]+", "_", f"SMART_TRAINER_{conn_id}_{name}".upper())
+
+
+def get_secret(conn_id: str, name: str) -> str | None:
+    """Get a connection secret from the environment or the system keyring.
+
+    Args:
+        conn_id (str): Connection id (e.g. ``"strava"``).
+        name (str): Secret name (e.g. ``"refresh_token"``).
+
+    Returns:
+        str | None: The secret, or ``None`` if not set.
+    """
+    if value := os.environ.get(_secret_env(conn_id, name)):
+        return value
+    try:
+        import keyring
+
+        return keyring.get_password(KEYRING_SERVICE, f"{conn_id}.{name}")
+    except Exception:
+        log.exception("keyring unavailable")
+        return None
+
+
+def set_secret(conn_id: str, name: str, value: str) -> None:
+    """Store a connection secret in the system keyring.
+
+    Args:
+        conn_id (str): Connection id.
+        name (str): Secret name.
+        value (str): Secret value.
+    """
+    import keyring
+
+    keyring.set_password(KEYRING_SERVICE, f"{conn_id}.{name}", value)
+
+
+def delete_secret(conn_id: str, name: str) -> None:
+    """Remove a connection secret from the system keyring (no error if missing).
+
+    Args:
+        conn_id (str): Connection id.
+        name (str): Secret name.
+    """
+    import keyring
+    from keyring.errors import PasswordDeleteError
+
+    with contextlib.suppress(PasswordDeleteError):
+        keyring.delete_password(KEYRING_SERVICE, f"{conn_id}.{name}")
 
 
 def get_api_key() -> str | None:

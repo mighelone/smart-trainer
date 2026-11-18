@@ -5,8 +5,8 @@ from smart_trainer.config import DEFAULT_POWER_ZONES, Settings
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.workout import parse_intervals_doc, zone_mid
-from smart_trainer.sync.base import AthleteProfile
-from smart_trainer.sync.intervals import IntervalsClient, parse_profile
+from smart_trainer.sync.base import AthleteProfile, Connection
+from smart_trainer.sync.intervals import IntervalsClient, IntervalsConnection, parse_profile
 from smart_trainer.ui.widgets import hr_zone_color, zone_color
 
 RUN = {"types": ["Run"], "ftp": None, "lthr": 170, "max_hr": 195, "hr_zones": [1, 2, 3]}
@@ -80,9 +80,30 @@ def _client(handler=_handler) -> IntervalsClient:
     return IntervalsClient("secret", "0", transport=httpx.MockTransport(handler))
 
 
-def _make_engine(tmp_path, provider, settings: Settings | None = None) -> Engine:
+class MockIntervals(IntervalsConnection):
+    """intervals.icu connection talking to a mock transport instead of the network."""
+
+    handler = staticmethod(_handler)
+
+    def is_configured(self) -> bool:
+        return True
+
+    def client(self, api_key: str | None = None) -> IntervalsClient:
+        return _client(self.handler)
+
+
+def _make_engine(tmp_path, handler=None, settings: Settings | None = None) -> Engine:
+    """Engine with a mock intervals.icu connection, or no connection if ``handler`` is None."""
     settings = settings or Settings(ftp=200, auto_upload=False)
-    return Engine.from_settings(settings, sessions=tmp_path, sync_provider=provider)
+
+    def connections() -> list[Connection]:
+        if handler is None:
+            return []
+        conn = MockIntervals(settings)
+        conn.handler = handler
+        return [conn]
+
+    return Engine.from_settings(settings, sessions=tmp_path, connections=connections)
 
 
 @pytest.fixture
@@ -93,7 +114,7 @@ def settings(tmp_path, monkeypatch):
 
 @pytest.fixture
 def engine(tmp_path, settings):
-    return _make_engine(tmp_path, _client, settings)
+    return _make_engine(tmp_path, _handler, settings)
 
 
 async def test_engine_sync_profile_updates_and_saves(engine, settings):
@@ -113,14 +134,14 @@ async def test_engine_sync_profile_skipped(engine, settings, tmp_path):
     settings._readonly = True
     assert await engine.sync.sync_profile() is None
     assert settings.ftp == 200
-    no_account = _make_engine(tmp_path, lambda: None)
+    no_account = _make_engine(tmp_path, None)
     assert await no_account.sync.sync_profile() is None
-    assert "API key" in no_account.messages[-1]
+    assert "No profile connection" in no_account.messages[-1]
 
 
 async def test_engine_sync_profile_error(tmp_path):
     settings = Settings(ftp=200, auto_upload=False)
-    engine = _make_engine(tmp_path, lambda: _client(lambda r: httpx.Response(401)), settings)
+    engine = _make_engine(tmp_path, lambda r: httpx.Response(401), settings)
     assert await engine.sync.sync_profile() is None
     assert "rejected" in engine.messages[-1]
     assert settings.profile_synced_at is None

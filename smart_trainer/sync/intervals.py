@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from pathlib import Path
+from typing import Self
 
 import httpx
 
-from smart_trainer.config import Settings, get_api_key
+from smart_trainer.config import get_api_key, set_api_key
 from smart_trainer.core.workout import parse_intervals_doc, parse_zwo
-from smart_trainer.sync.base import AthleteProfile, PlannedWorkout
+from smart_trainer.sync.base import (
+    AthleteProfile,
+    Capability,
+    Connection,
+    PlannedWorkout,
+    RideUpload,
+    register,
+)
 
 log = logging.getLogger(__name__)
 BASE_URL = "https://intervals.icu/api/v1"
@@ -110,6 +117,18 @@ class IntervalsClient:
         """Close the underlying HTTP client."""
         await self._client.aclose()
 
+    async def __aenter__(self) -> Self:
+        """Enter the context.
+
+        Returns:
+            Self: This client.
+        """
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        """Close the client on exit."""
+        await self.aclose()
+
     async def _request(self, method: str, url: str, **kw) -> httpx.Response:
         """Send a request and raise on error responses.
 
@@ -208,44 +227,131 @@ class IntervalsClient:
             log.info("no zwo for event %s: %s", event_id, exc)
             return None
 
-    async def upload_activity(
-        self, fit_path: Path, name: str, description: str = "", paired_event_id: str | None = None
-    ) -> str:
-        """Upload a FIT activity file.
+    async def upload_activity(self, ride: RideUpload) -> str:
+        """Upload a FIT activity file, paired with its planned workout if any.
 
         Args:
-            fit_path (Path): Path of the FIT file.
-            name (str): Activity name.
-            description (str): Activity description.
-            paired_event_id (str | None): Planned event to pair the activity with.
+            ride (RideUpload): The ride to upload.
 
         Returns:
             str: Id of the created activity.
         """
-        params = {"name": name}
-        if description:
-            params["description"] = description
-        if paired_event_id:
-            params["paired_event_id"] = paired_event_id
-        with fit_path.open("rb") as fh:
+        params = {"name": ride.name}
+        if ride.description:
+            params["description"] = ride.description
+        if ride.workout_source_id:
+            params["paired_event_id"] = ride.workout_source_id
+        with ride.fit_path.open("rb") as fh:
             r = await self._request(
                 "POST",
                 f"/athlete/{self.athlete_id}/activities",
                 params=params,
-                files={"file": (fit_path.name, fh, "application/octet-stream")},
+                files={"file": (ride.fit_path.name, fh, "application/octet-stream")},
             )
         data = r.json()
         return str(data.get("id") or data.get("activities", [{}])[0].get("id", ""))
 
 
-def intervals_provider(settings: Settings) -> IntervalsClient | None:
-    """Create an intervals.icu client from the stored API key.
+@register
+class IntervalsConnection(Connection):
+    """intervals.icu: planned workouts, rider profile and ride upload.
 
-    Args:
-        settings (Settings): User settings (for the athlete id).
-
-    Returns:
-        IntervalsClient | None: A client, or ``None`` if no API key is configured.
+    Options: ``athlete_id`` (``"0"`` means the owner of the API key).
+    Secret: the API key (``get_api_key``/``set_api_key``).
     """
-    key = get_api_key()
-    return IntervalsClient(key, settings.intervals_athlete_id) if key else None
+
+    id = "intervals"
+    name = "intervals.icu"
+    capabilities = frozenset({Capability.UPLOAD, Capability.WORKOUTS, Capability.PROFILE})
+
+    @property
+    def athlete_id(self) -> str:
+        """Configured athlete id.
+
+        Returns:
+            str: The athlete id, ``"0"`` by default.
+        """
+        return str(self.options.get("athlete_id") or "0")
+
+    def is_configured(self) -> bool:
+        """Whether an API key is set.
+
+        Returns:
+            bool: ``True`` if configured.
+        """
+        return bool(get_api_key())
+
+    def set_api_key(self, key: str) -> None:
+        """Store the API key.
+
+        Args:
+            key (str): The API key.
+        """
+        set_api_key(key)
+
+    def client(self, api_key: str | None = None) -> IntervalsClient:
+        """Create an API client.
+
+        Args:
+            api_key (str | None): Key to use instead of the stored one.
+
+        Raises:
+            IntervalsError: If no API key is configured.
+
+        Returns:
+            IntervalsClient: A new client (close it after use).
+        """
+        key = api_key or get_api_key()
+        if not key:
+            raise IntervalsError("No intervals.icu API key")
+        return IntervalsClient(key, self.athlete_id)
+
+    async def test(self, api_key: str | None = None) -> str:
+        """Check the API key by fetching the athlete.
+
+        Args:
+            api_key (str | None): Key to test instead of the stored one.
+
+        Returns:
+            str: The athlete name.
+        """
+        async with self.client(api_key) as c:
+            return (await c.athlete()).get("name") or "athlete"
+
+    async def upload_activity(self, ride: RideUpload) -> str:
+        """Upload a ride.
+
+        Args:
+            ride (RideUpload): The ride to upload.
+
+        Returns:
+            str: Id of the created activity.
+        """
+        async with self.client() as c:
+            return await c.upload_activity(ride)
+
+    async def list_workouts(
+        self, oldest: date, newest: date, ftp: int, zones: list[int] | None = None
+    ) -> list[PlannedWorkout]:
+        """List planned ride workouts in a date range.
+
+        Args:
+            oldest (date): First day of the range (inclusive).
+            newest (date): Last day of the range (inclusive).
+            ftp (int): Rider's FTP in watts, used to resolve targets.
+            zones (list[int] | None): Rider's power zone upper bounds (% of FTP).
+
+        Returns:
+            list[PlannedWorkout]: Planned workouts sorted by day.
+        """
+        async with self.client() as c:
+            return await c.list_workouts(oldest, newest, ftp, zones)
+
+    async def profile(self) -> AthleteProfile:
+        """Fetch the rider's profile.
+
+        Returns:
+            AthleteProfile: The rider profile.
+        """
+        async with self.client() as c:
+            return await c.profile()

@@ -1,13 +1,15 @@
-"""Sync provider interface. intervals.icu now; Garmin Connect can be added later."""
+"""Connection interface: training platforms that provide workouts/profile or accept rides."""
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
+from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Any, ClassVar
 
-from smart_trainer.config import Settings
+from smart_trainer.config import ConnectionSettings, Settings
 from smart_trainer.core.workout import Workout
 
 # Settings fields an AthleteProfile can update, with their user-facing labels
@@ -83,19 +85,132 @@ class PlannedWorkout:
     duration_s: int
 
 
-class SyncProvider(Protocol):
-    """Interface for training platforms that provide workouts and accept activities.
+@dataclass
+class RideUpload:
+    """A finished ride to upload. Each connection uses the fields it understands.
 
     Attributes:
-        name (str): Human-readable provider name.
+        fit_path (Path): Path of the FIT file.
+        name (str): Activity name.
+        description (str): Activity description.
+        started_at (float | None): Unix time the ride started.
+        workout_source_id (str | None): Id of the planned workout on the platform it came
+            from (intervals.icu pairs the activity with that event).
     """
 
+    fit_path: Path
     name: str
+    description: str = ""
+    started_at: float | None = None
+    workout_source_id: str | None = None
+
+
+class Capability(StrEnum):
+    """What a connection can do."""
+
+    UPLOAD = "upload"  # accepts finished rides
+    WORKOUTS = "workouts"  # provides planned workouts
+    PROFILE = "profile"  # provides FTP, weight and zones
+
+
+class Connection(ABC):
+    """A training platform the app connects to (intervals.icu, Strava, …).
+
+    To add one: subclass it in a new module of ``smart_trainer.sync``, decorate the class
+    with :func:`register`, import the module in ``smart_trainer.sync.registry`` and,
+    optionally, add a settings card in ``smart_trainer.ui.connections``.
+
+    Implement :meth:`is_configured` and :meth:`test`, plus the method of each declared
+    capability: :meth:`upload_activity`, :meth:`list_workouts` or :meth:`profile`.
+
+    Attributes:
+        id (str): Stable identifier, used as key in settings, secrets and session files.
+        name (str): Human-readable name.
+        capabilities (frozenset[Capability]): What the connection can do.
+        settings (Settings): Application settings.
+    """
+
+    id: ClassVar[str]
+    name: ClassVar[str]
+    capabilities: ClassVar[frozenset[Capability]]
+
+    def __init__(self, settings: Settings) -> None:
+        """Initialize the connection.
+
+        Args:
+            settings (Settings): Application settings.
+        """
+        self.settings = settings
+
+    @property
+    def conf(self) -> ConnectionSettings:
+        """Settings of this connection.
+
+        Returns:
+            ConnectionSettings: The connection settings.
+        """
+        return self.settings.connection(self.id)
+
+    @property
+    def options(self) -> dict[str, Any]:
+        """Non-secret options of this connection.
+
+        Returns:
+            dict[str, Any]: The options (mutable).
+        """
+        return self.conf.options
+
+    def has(self, capability: Capability) -> bool:
+        """Whether the connection has a capability.
+
+        Args:
+            capability (Capability): The capability.
+
+        Returns:
+            bool: ``True`` if supported.
+        """
+        return capability in self.capabilities
+
+    @property
+    def usable(self) -> bool:
+        """Whether the connection is enabled and has its credentials.
+
+        Returns:
+            bool: ``True`` if it can be used.
+        """
+        return self.conf.enabled and self.is_configured()
+
+    @abstractmethod
+    def is_configured(self) -> bool:
+        """Whether the credentials needed to use the connection are present.
+
+        Returns:
+            bool: ``True`` if configured.
+        """
+
+    @abstractmethod
+    async def test(self) -> str:
+        """Check the credentials against the service.
+
+        Returns:
+            str: The connected account name.
+        """
+
+    async def upload_activity(self, ride: RideUpload) -> str:
+        """Upload a finished ride (``UPLOAD`` capability).
+
+        Args:
+            ride (RideUpload): The ride to upload.
+
+        Returns:
+            str: Id of the created activity.
+        """
+        raise NotImplementedError
 
     async def list_workouts(
         self, oldest: date, newest: date, ftp: int, zones: list[int] | None = None
     ) -> list[PlannedWorkout]:
-        """List planned workouts in a date range.
+        """List planned workouts in a date range (``WORKOUTS`` capability).
 
         Args:
             oldest (date): First day of the range (inclusive).
@@ -106,28 +221,28 @@ class SyncProvider(Protocol):
         Returns:
             list[PlannedWorkout]: Planned workouts sorted by day.
         """
+        raise NotImplementedError
 
     async def profile(self) -> AthleteProfile:
-        """Fetch the rider's profile (FTP, weight, zones).
+        """Fetch the rider's profile (``PROFILE`` capability).
 
         Returns:
             AthleteProfile: The rider profile.
         """
+        raise NotImplementedError
 
-    async def upload_activity(
-        self, fit_path: Path, name: str, description: str = "", paired_event_id: str | None = None
-    ) -> str:
-        """Upload a FIT activity file.
 
-        Args:
-            fit_path (Path): Path of the FIT file.
-            name (str): Activity name.
-            description (str): Activity description.
-            paired_event_id (str | None): Planned event to pair the activity with.
+REGISTRY: dict[str, type[Connection]] = {}
 
-        Returns:
-            str: Id of the created activity.
-        """
 
-    async def aclose(self) -> None:
-        """Release the provider's resources (e.g. its HTTP connection)."""
+def register[C: type[Connection]](cls: C) -> C:
+    """Class decorator that makes a connection available to the app.
+
+    Args:
+        cls (type[Connection]): The connection class.
+
+    Returns:
+        type[Connection]: The same class.
+    """
+    REGISTRY[cls.id] = cls
+    return cls

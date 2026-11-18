@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from smart_trainer.sync.base import RideUpload
 from smart_trainer.sync.intervals import IntervalsClient, IntervalsError
 
 DOC = json.loads((Path(__file__).parent / "data" / "cadence_endurance_doc.json").read_text())
@@ -62,7 +63,8 @@ async def test_list_and_upload(tmp_path):
     assert ws[0].workout.source_id == "1" and ws[1].duration_s == 600
     fit = tmp_path / "ride.fit"
     fit.write_bytes(b"FIT")
-    assert await c.upload_activity(fit, "Ride", paired_event_id="1") == "i123"
+    ride = RideUpload(fit, "Ride", workout_source_id="1")
+    assert await c.upload_activity(ride) == "i123"
     await c.aclose()
 
 

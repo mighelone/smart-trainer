@@ -1,42 +1,41 @@
-"""Talks to the training platform through a :class:`SyncProvider`, whichever it is."""
+"""Talks to the training platforms through their :class:`Connection`, whichever they are."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
-from pathlib import Path
+from collections.abc import Callable
 
 from smart_trainer.config import Settings
-from smart_trainer.sync.base import SyncProvider
+from smart_trainer.sync.base import Capability, Connection, RideUpload
 
 log = logging.getLogger(__name__)
 
-ProviderFactory = Callable[[], SyncProvider | None]
-"""Creates a provider, or returns ``None`` when no account is configured."""
+ConnectionsFactory = Callable[[], list[Connection]]
+"""Returns the available connections (configured or not)."""
 
-
-NO_ACCOUNT = "No intervals.icu API key"
+UploadOutcome = tuple[str | None, str | None]
+"""``(activity id, None)`` on success, ``(None, error message)`` on failure."""
 
 
 class SyncUnavailable(RuntimeError):
-    """Raised when no provider can be used (demo mode or no account configured)."""
+    """Raised when nothing can be synced (demo mode or no connection configured)."""
 
 
 class SyncService:
-    """Uploads activities and syncs the rider profile.
+    """Uploads activities to the connections and syncs the rider profile.
 
-    The concrete platform is hidden behind the injected provider factory, so adding
-    another platform means writing a new :class:`SyncProvider`, not changing this class.
+    The concrete platforms are hidden behind the injected connections factory, so adding
+    another platform means writing a new :class:`Connection`, not changing this class.
     """
 
     def __init__(
         self,
         settings: Settings,
         messages: deque[str],
-        provider_factory: ProviderFactory,
+        connections: ConnectionsFactory,
         ride_active: Callable[[], bool],
     ) -> None:
         """Initialize the service.
@@ -44,57 +43,113 @@ class SyncService:
         Args:
             settings (Settings): User settings, updated by the profile sync.
             messages (deque[str]): User-facing status messages.
-            provider_factory (ProviderFactory): Creates the sync provider.
+            connections (ConnectionsFactory): Returns the available connections.
             ride_active (Callable[[], bool]): Whether a ride is in progress.
         """
         self._settings = settings
         self._messages = messages
-        self._factory = provider_factory
+        self._factory = connections
         self._ride_active = ride_active
 
-    @asynccontextmanager
-    async def provider(self) -> AsyncIterator[SyncProvider | None]:
-        """Open a provider for the duration of a ``with`` block, closing it afterwards.
-
-        Yields:
-            SyncProvider | None: The provider, or ``None`` if no account is configured.
-        """
-        provider = self._factory()
-        if provider is None:
-            yield None
-            return
-        try:
-            yield provider
-        finally:
-            await provider.aclose()
-
-    async def upload(self, fit: Path, name: str, paired_event_id: str | None = None) -> str:
-        """Upload a FIT activity.
-
-        Args:
-            fit (Path): Path of the FIT file.
-            name (str): Activity name.
-            paired_event_id (str | None): Planned event to pair the activity with.
+    def connections(self) -> list[Connection]:
+        """All available connections, configured or not.
 
         Returns:
-            str: Id of the created activity.
+            list[Connection]: The connections.
+        """
+        return self._factory()
+
+    def with_capability(self, capability: Capability) -> list[Connection]:
+        """Connections that support a capability, configured or not.
+
+        Args:
+            capability (Capability): The capability.
+
+        Returns:
+            list[Connection]: Matching connections.
+        """
+        return [c for c in self.connections() if c.has(capability)]
+
+    def connected(self, capability: Capability) -> list[Connection]:
+        """Enabled, configured connections that support a capability.
+
+        Args:
+            capability (Capability): The capability.
+
+        Returns:
+            list[Connection]: Usable connections.
+        """
+        return [c for c in self.with_capability(capability) if c.usable]
+
+    def auto_upload_targets(self) -> list[str]:
+        """Connections a finished ride is uploaded to automatically.
+
+        Returns:
+            list[str]: Connection ids (empty if automatic upload is off).
+        """
+        if not self._settings.auto_upload:
+            return []
+        return [c.id for c in self.connected(Capability.UPLOAD) if c.conf.auto_upload]
+
+    async def upload(
+        self,
+        ride: RideUpload,
+        targets: list[str] | None = None,
+        skip: set[str] | frozenset[str] = frozenset(),
+    ) -> dict[str, UploadOutcome]:
+        """Upload a ride to the connections, concurrently; one failing doesn't stop the others.
+
+        Args:
+            ride (RideUpload): The ride to upload.
+            targets (list[str] | None): Connection ids to upload to; defaults to every
+                enabled, configured upload connection.
+            skip (set[str] | frozenset[str]): Connection ids to leave out (already uploaded).
+
+        Returns:
+            dict[str, UploadOutcome]: Outcome by connection id.
 
         Raises:
-            SyncUnavailable: If no provider can be used; a message explains why.
+            SyncUnavailable: If nothing can be uploaded; a message explains why.
         """
         if self._settings._readonly:
             self._messages.append("Demo mode: uploads are disabled")
             raise SyncUnavailable("demo mode")
-        async with self.provider() as p:
-            if p is None:
-                self._messages.append(f"{NO_ACCOUNT}: saved locally only")
-                raise SyncUnavailable("no sync account")
-            aid = await p.upload_activity(fit, name, paired_event_id=paired_event_id)
-        self._messages.append(f"Uploaded to {p.name} ({aid})")
-        return aid
+        conns = [
+            c
+            for c in self.connected(Capability.UPLOAD)
+            if (targets is None or c.id in targets) and c.id not in skip
+        ]
+        if not conns:
+            self._messages.append("No connection to upload to: saved locally only")
+            raise SyncUnavailable("no connection")
+        outcomes = await asyncio.gather(*(self._upload_one(c, ride) for c in conns))
+        result: dict[str, UploadOutcome] = {}
+        for c, (aid, err) in zip(conns, outcomes, strict=True):
+            result[c.id] = (aid, err)
+            self._messages.append(
+                f"Uploaded to {c.name} ({aid})" if err is None else f"{c.name} upload failed: {err}"
+            )
+        return result
+
+    @staticmethod
+    async def _upload_one(conn: Connection, ride: RideUpload) -> UploadOutcome:
+        """Upload a ride to one connection, capturing the error.
+
+        Args:
+            conn (Connection): The connection.
+            ride (RideUpload): The ride.
+
+        Returns:
+            UploadOutcome: The activity id, or the error message.
+        """
+        try:
+            return await conn.upload_activity(ride), None
+        except Exception as exc:
+            log.warning("upload of %s to %s failed: %s", ride.fit_path.name, conn.name, exc)
+            return None, str(exc) or type(exc).__name__
 
     async def sync_profile(self) -> list[str] | None:
-        """Update FTP, weight and zones from the provider and save the settings.
+        """Update FTP, weight and zones from the profile connection and save the settings.
 
         Skipped during a ride, so the ride keeps the FTP it started with.
 
@@ -108,17 +163,18 @@ class SyncService:
         if self._ride_active():
             self._messages.append("Profile sync skipped during a ride")
             return None
-        async with self.provider() as p:
-            if p is None:
-                self._messages.append(f"{NO_ACCOUNT}: profile not synced")
-                return None
-            log.info("syncing profile from %s", p.name)
-            try:
-                profile = await p.profile()
-            except Exception as exc:
-                log.warning("profile sync failed: %s", exc)
-                self._messages.append(f"Profile sync failed: {exc}")
-                return None
+        conns = self.connected(Capability.PROFILE)
+        if not conns:
+            self._messages.append("No profile connection configured: profile not synced")
+            return None
+        conn = conns[0]
+        log.info("syncing profile from %s", conn.name)
+        try:
+            profile = await conn.profile()
+        except Exception as exc:
+            log.warning("profile sync failed: %s", exc)
+            self._messages.append(f"Profile sync failed: {exc}")
+            return None
         if self._ride_active():  # a ride started while we were waiting
             self._messages.append("Profile sync skipped during a ride")
             return None
@@ -127,8 +183,9 @@ class SyncService:
         st.profile_synced_at = time.time()
         st.save()
         log.info(
-            "profile synced: FTP %s W, weight %s kg, power zones %s, "
+            "profile synced from %s: FTP %s W, weight %s kg, power zones %s, "
             "HR zones %s, LTHR %s, max HR %s (changed: %s)",
+            conn.name,
             st.ftp,
             st.weight_kg,
             st.power_zones,

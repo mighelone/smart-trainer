@@ -6,7 +6,8 @@ Each concern lives in its own component, exposed as an attribute:
 - :attr:`Engine.ride` (:class:`Ride`): the ride in progress;
 - :attr:`Engine.calibration` (:class:`CalibrationService`): device calibration;
 - :attr:`Engine.store` (:class:`SessionStore`): session files, FIT export, recovery;
-- :attr:`Engine.sync` (:class:`SyncService`): uploads and profile sync.
+- :attr:`Engine.sync` (:class:`SyncService`): uploads and profile sync, through the
+  connections (intervals.icu, Strava, …).
 
 The UI only reads component state and calls component methods, so the core is
 UI-agnostic. The engine is an async context manager that owns the lifecycle::
@@ -35,7 +36,7 @@ from smart_trainer.core.ride import Ride
 from smart_trainer.core.sessions import SessionStore
 from smart_trainer.core.sources import SourceSelector
 from smart_trainer.core.state import Snapshot
-from smart_trainer.sync.service import ProviderFactory, SyncService
+from smart_trainer.sync.service import ConnectionsFactory, SyncService
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class Engine:
         settings: Settings,
         sessions: Path | None = None,
         tick_s: float = 1.0,
-        sync_provider: ProviderFactory | None = None,
+        connections: ConnectionsFactory | None = None,
         run_loop: bool = True,
     ) -> Engine:
         """Build the default component graph and the engine around it.
@@ -91,8 +92,9 @@ class Engine:
             settings (Settings): User settings.
             sessions (Path | None): Session directory; defaults to :func:`sessions_dir`.
             tick_s (float): Loop interval in seconds.
-            sync_provider (ProviderFactory | None): Creates the sync provider; without
-                one, uploads and profile sync are unavailable.
+            connections (ConnectionsFactory | None): Returns the connections (e.g.
+                :func:`smart_trainer.sync.registry.all_connections`); without it, uploads
+                and profile sync are unavailable.
             run_loop (bool): Whether entering the context starts the 1 Hz loop.
 
         Returns:
@@ -115,7 +117,7 @@ class Engine:
             """
             return ride.active
 
-        sync = SyncService(settings, messages, sync_provider or (lambda: None), ride_active)
+        sync = SyncService(settings, messages, connections or (lambda: []), ride_active)
         store = SessionStore(sessions or sessions_dir(), settings, sync, messages)
         calibration = CalibrationService(devices, controller, messages, ride_active)
         ride = Ride(settings, controller, store, messages, tick_s, blocker=calibration.ride_blocker)

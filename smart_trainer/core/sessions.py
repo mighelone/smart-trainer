@@ -10,6 +10,7 @@ from smart_trainer.config import Settings
 from smart_trainer.core.recorder import Recorder, SessionInfo, find_unfinished
 from smart_trainer.core.workout import Workout
 from smart_trainer.export.fit import export_fit
+from smart_trainer.sync.base import RideUpload
 from smart_trainer.sync.service import SyncService, SyncUnavailable
 
 log = logging.getLogger(__name__)
@@ -66,8 +67,8 @@ class SessionStore:
 
         Args:
             rec (Recorder): The session recorder.
-            upload (bool | None): Whether to upload; defaults to the
-                ``auto_upload`` setting.
+            upload (bool | None): ``True`` uploads to every connected upload target,
+                ``False`` never uploads, ``None`` follows the automatic upload settings.
 
         Returns:
             Path | None: The FIT file path, or ``None`` if the session has no samples.
@@ -77,44 +78,59 @@ class SessionStore:
         if info.n_samples:
             fit = export_fit(rec, rec.path.with_suffix(".fit"))
         rec.set_status("finished")
-        if fit and (self._settings.auto_upload if upload is None else upload):
+        if fit and upload is None:
+            if targets := self._sync.auto_upload_targets():
+                await self.upload(rec, fit, info, targets)
+        elif fit and upload:
             await self.upload(rec, fit, info)
         return fit
 
-    async def upload(self, rec: Recorder, fit: Path, info: SessionInfo | None = None) -> bool:
-        """Upload a FIT file and record the outcome in the session.
+    async def upload(
+        self,
+        rec: Recorder,
+        fit: Path,
+        info: SessionInfo | None = None,
+        targets: list[str] | None = None,
+    ) -> dict[str, bool]:
+        """Upload a FIT file to the connections and record each outcome in the session.
+
+        Connections the session was already uploaded to are skipped.
 
         Args:
             rec (Recorder): The session recorder.
             fit (Path): Path of the FIT file to upload.
             info (SessionInfo | None): Session info; read from ``rec`` if omitted.
+            targets (list[str] | None): Connection ids to upload to; defaults to every
+                enabled, configured upload connection.
 
         Returns:
-            bool: ``True`` if the upload succeeded.
+            dict[str, bool]: Whether the upload succeeded, by connection id (empty if
+            nothing was attempted; a message explains why).
         """
         info = info or rec.info()
+        ride = RideUpload(
+            fit,
+            info.name,
+            started_at=info.started_at,
+            workout_source_id=info.workout.source_id if info.workout else None,
+        )
+        done = {cid for cid, state in info.uploads.items() if state.done}
         try:
-            aid = await self._sync.upload(
-                fit, info.name, paired_event_id=info.workout.source_id if info.workout else None
-            )
+            outcomes = await self._sync.upload(ride, targets, skip=done)
         except SyncUnavailable:
-            return False  # nothing was attempted: the session status stays as it is
-        except Exception as exc:
-            log.warning("upload of %s failed: %s", fit.name, exc)
-            rec.set_status("finished", upload_error=str(exc))
-            self._messages.append(f"Upload failed: {exc}")
-            return False
-        rec.set_status("uploaded", upload_id=aid, upload_error=None)
-        return True
+            return {}  # nothing was attempted: the session stays as it is
+        for cid, (aid, err) in outcomes.items():
+            rec.set_upload(cid, aid, err)
+        return {cid: err is None for cid, (_, err) in outcomes.items()}
 
-    async def upload_session(self, info: SessionInfo) -> bool:
-        """Upload an already finished session.
+    async def upload_session(self, info: SessionInfo) -> dict[str, bool]:
+        """Upload an already finished session where it's still missing.
 
         Args:
             info (SessionInfo): The session; its FIT file must exist.
 
         Returns:
-            bool: ``True`` if the upload succeeded.
+            dict[str, bool]: Whether the upload succeeded, by connection id.
         """
         rec = self.open(info)
         try:
@@ -127,8 +143,8 @@ class SessionStore:
 
         Args:
             info (SessionInfo): The unfinished session.
-            upload (bool | None): Whether to upload; defaults to the
-                ``auto_upload`` setting.
+            upload (bool | None): ``True`` uploads to every connected upload target,
+                ``False`` never uploads, ``None`` follows the automatic upload settings.
 
         Returns:
             Path | None: The FIT file path, or ``None`` if the session has no samples.

@@ -14,7 +14,7 @@ from smart_trainer.ble.device import (
     CalibrationKind,
     CalibrationPhase,
 )
-from smart_trainer.config import Settings, get_api_key, set_api_key
+from smart_trainer.config import Settings
 from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.library import builtin_workouts
@@ -22,6 +22,8 @@ from smart_trainer.core.recorder import list_sessions
 from smart_trainer.core.ride import HistoryPoint, RideState
 from smart_trainer.core.state import ConnState, Role
 from smart_trainer.core.workout import Workout, parse_zwo
+from smart_trainer.sync.base import Capability
+from smart_trainer.ui.connections import connection_card
 from smart_trainer.ui.theme import apply_theme
 from smart_trainer.ui.widgets import (
     Tile,
@@ -266,15 +268,16 @@ def ride_page() -> None:
 
         Args:
             dialog (ui.dialog): Confirmation dialog to close.
-            upload (bool): Whether to upload the ride to intervals.icu.
+            upload (bool): Whether to upload the ride to the connected services.
         """
         dialog.close()
         n = ui.notification("Saving session…", spinner=True, timeout=None)
+        seen = len(e.messages)
         fit = await e.ride.finish(upload=upload)
         n.dismiss()
         S.selected = None
         ui.notify(f"Saved {fit.name}" if fit else "Nothing recorded", type="positive")
-        for m in list(e.messages)[-1:]:
+        for m in list(e.messages)[seen:]:
             ui.notify(m)
 
     def confirm_finish() -> None:
@@ -478,7 +481,7 @@ def ride_page() -> None:
 # ================================================================= WORKOUTS
 @ui.page("/workouts")
 def workouts_page() -> None:
-    """Workouts page: planned intervals.icu workouts, built-ins and .zwo import."""
+    """Workouts page: planned workouts from the connections, built-ins and .zwo import."""
     e = S.engine
     frame("Workouts")
     with ui.column().classes("page"):
@@ -487,7 +490,10 @@ def workouts_page() -> None:
                 ui.icon("check_circle", color="positive")
                 ui.label(f"Selected: {S.selected.name}").classes("list-title")
         with ui.row().classes("items-center gap-2 w-full"):
-            ui.label("Planned on intervals.icu").classes("section-title")
+            sources = e.sync.with_capability(Capability.WORKOUTS)
+            ui.label(
+                "Planned on " + " & ".join(c.name for c in sources) if sources else "Planned"
+            ).classes("section-title")
             ui.space()
             ui.button("Refresh", icon="refresh", on_click=lambda: load()).props("color=secondary")
             ui.button("Free ride", icon="all_inclusive", on_click=lambda: choose(None)).props(
@@ -536,7 +542,7 @@ def workouts_page() -> None:
             wo (Workout): The workout to show.
             subtitle (str): Text shown under the workout name.
             where (ui.element | None): Container to render into; defaults to the
-                intervals.icu listing.
+                planned workouts listing.
         """
         with where or listing, ui.card().classes("w-full panel gap-2"):
             with ui.row().classes("items-center w-full"):
@@ -552,31 +558,33 @@ def workouts_page() -> None:
             workout_chart(wo, S.settings.ftp, height="h-28", live=False)
 
     async def load() -> None:
-        """Load planned workouts from intervals.icu into the listing."""
+        """Load planned workouts from the connected services into the listing."""
         listing.clear()
-        async with e.sync.provider() as provider:
-            if provider is None:
-                status.set_text(
-                    "Add your intervals.icu API key in Settings to load planned workouts."
-                )
-                return
-            status.set_text("Loading…")
+        sources = e.sync.connected(Capability.WORKOUTS)
+        if not sources:
+            names = " or ".join(c.name for c in e.sync.with_capability(Capability.WORKOUTS))
+            status.set_text(f"Connect {names or 'a service'} in Settings to load planned workouts.")
+            return
+        status.set_text("Loading…")
+        today = date.today()
+        planned, errors = [], []
+        for conn in sources:
             try:
-                today = date.today()
-                planned = await provider.list_workouts(
+                planned += await conn.list_workouts(
                     today - timedelta(days=2),
                     today + timedelta(days=7),
                     S.settings.ftp,
                     S.settings.power_zones,
                 )
             except Exception as exc:
-                status.set_text(f"Could not load workouts: {exc}")
-                return
-        status.set_text(
+                errors.append(f"Could not load workouts from {conn.name}: {exc}")
+        planned.sort(key=lambda p: p.day)
+        text = (
             f"{len(planned)} cycling workouts planned"
             if planned
             else "No cycling workouts planned in the next 7 days."
         )
+        status.set_text(" · ".join(errors) if errors and not planned else text)
         for p in planned:
             label = "Today" if p.day == date.today() else p.day.strftime("%a %d %b")
             card(p.workout, label)
@@ -842,45 +850,71 @@ def history_page() -> None:
         ui.label(f"Stored in {e.store.directory}").classes("hint")
         listing = ui.column().classes("w-full gap-2")
 
+    def upload_chip(name: str, state) -> None:
+        """Show the upload state of a session on one connection.
+
+        Args:
+            name (str): Connection name.
+            state (UploadState | None): Upload outcome, ``None`` if never uploaded.
+        """
+        if state and state.done:
+            icon, color, tip = "cloud_done", "positive", f"Uploaded to {name} ({state.remote_id})"
+        elif state and state.error:
+            icon, color, tip = "error", "negative", f"{name} upload failed: {state.error}"
+        else:
+            icon, color, tip = "cloud_off", "grey", f"Not uploaded to {name}"
+        with ui.row().classes("items-center gap-1 no-wrap"):
+            ui.icon(icon, color=color, size="xs")
+            ui.label(name).classes("list-sub")
+            ui.tooltip(tip)
+
     def render() -> None:
         """Redraw the list of recorded sessions."""
         listing.clear()
+        uploaders = e.sync.with_capability(Capability.UPLOAD)
+        names = {c.id: c.name for c in uploaders}
         with listing:
             for s in list_sessions(e.store.directory):
                 with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
+                    done = any(u.done for u in s.uploads.values())
                     icon, color = {
-                        "uploaded": ("cloud_done", "positive"),
-                        "finished": ("save", "primary"),
+                        "finished": ("cloud_done", "positive") if done else ("save", "primary"),
                         "active": ("warning", "warning"),
                     }.get(s.status, ("help", "grey"))
                     ui.icon(icon, color=color, size="sm")
                     with ui.column().classes("gap-0"):
                         ui.label(s.name).classes("list-title")
-                        extra = f" · upload error: {s.upload_error}" if s.upload_error else ""
                         when = f"{s.started:%a %d %b %Y %H:%M}"
-                        ui.label(f"{when} · {fmt_time(s.elapsed_s)} · {s.status}{extra}").classes(
+                        ui.label(f"{when} · {fmt_time(s.elapsed_s)} · {s.status}").classes(
                             "list-sub"
                         )
+                        shown = [c.id for c in uploaders if c.usable or c.id in s.uploads]
+                        shown += [cid for cid in s.uploads if cid not in shown]
+                        if s.status == "finished" and shown:
+                            with ui.row().classes("gap-3"):
+                                for cid in shown:
+                                    upload_chip(names.get(cid, cid), s.uploads.get(cid))
                     ui.space()
                     fit = s.path.with_suffix(".fit")
-                    if s.status == "finished" and fit.exists():
+                    pending = [c.name for c in uploaders if c.usable and not s.uploaded(c.id)]
+                    if s.status == "finished" and fit.exists() and pending:
 
                         async def up(s=s):
-                            """Upload a finished session to intervals.icu.
+                            """Upload a finished session where it's still missing.
 
                             Args:
                                 s (SessionInfo): The session to upload.
                             """
-                            ok = await e.store.upload_session(s)
-                            ui.notify(
-                                "Uploaded" if ok else e.messages[-1],
-                                type="positive" if ok else "negative",
-                            )
+                            seen = len(e.messages)
+                            result = await e.store.upload_session(s)
+                            ok = bool(result) and all(result.values())
+                            for m in list(e.messages)[seen:]:
+                                ui.notify(m, type="positive" if ok else "negative")
                             render()
 
                         ui.button("Upload", icon="cloud_upload", on_click=up).props(
                             "color=secondary"
-                        )
+                        ).tooltip("Upload to " + ", ".join(pending))
 
     render()
 
@@ -922,16 +956,18 @@ def profile_summary(st: Settings) -> str:
 
 @ui.page("/settings")
 def settings_page() -> None:
-    """Settings page: rider profile, intervals.icu and power matching."""
+    """Settings page: rider profile, connections and power matching."""
     e = S.engine
     st = S.settings
     frame("Settings")
+    profile_sources = e.sync.with_capability(Capability.PROFILE)
+    source = " or ".join(c.name for c in profile_sources) or "your training platform"
     with (
         ui.column().classes("page page-narrow [&_.q-field]:w-full"),
         ui.card().classes("w-full panel gap-3"),
     ):
         ui.label("Rider profile").classes("section-title")
-        sync = ui.switch("Sync FTP, zones and weight from intervals.icu", value=st.sync_profile)
+        sync = ui.switch(f"Sync FTP, zones and weight from {source}", value=st.sync_profile)
         ftp = ui.number("FTP (W)", value=st.ftp, min=50, max=600, step=1)
         weight = ui.number("Weight (kg)", value=st.weight_kg, min=30, max=200, step=0.5)
         summary = ui.label("").classes("hint whitespace-pre-line")
@@ -953,7 +989,7 @@ def settings_page() -> None:
             summary.set_text(profile_summary(st))
 
         async def sync_now() -> None:
-            """Fetch the profile from intervals.icu and show the result."""
+            """Fetch the profile and show the result."""
             sync_btn.props("loading")
             try:
                 changed = await e.sync.sync_profile()
@@ -966,32 +1002,29 @@ def settings_page() -> None:
                 ui.notify(text, type="positive")
             refresh_profile()
 
+        def can_sync() -> bool:
+            """Whether a profile connection is usable.
+
+            Returns:
+                bool: ``True`` if the profile can be synced.
+            """
+            return bool(e.sync.connected(Capability.PROFILE))
+
         async def toggle_sync() -> None:
             """Persist the sync switch; sync right away when it is turned on."""
             st.sync_profile = bool(sync.value)
             st.save()
             refresh_profile()
-            if st.sync_profile and get_api_key():
+            if st.sync_profile and can_sync():
+                await sync_now()
+
+        async def credentials_changed() -> None:
+            """Sync the profile once a connection gets its credentials."""
+            if st.sync_profile and can_sync():
                 await sync_now()
 
         sync.on_value_change(toggle_sync)
         refresh_profile()
-        ui.separator()
-        ui.label("intervals.icu").classes("section-title mt-2")
-        ui.label(
-            "Find your API key at intervals.icu → Settings → Developer Settings. "
-            "It is stored in the macOS Keychain."
-        ).classes("hint")
-        key = ui.input(
-            "API key",
-            password=True,
-            password_toggle_button=True,
-            placeholder="(saved)" if get_api_key() else "",
-        )
-        athlete = ui.input("Athlete ID", value=st.intervals_athlete_id).tooltip(
-            "Leave 0 for your own account"
-        )
-        auto = ui.switch("Upload automatically after each ride", value=st.auto_upload)
         ui.separator()
         ui.label("Power matching (pedals as power source)").classes("section-title mt-2")
         max_off = ui.number("Max correction (W)", value=st.power_match.max_offset_w, min=0, max=150)
@@ -999,47 +1032,33 @@ def settings_page() -> None:
             "Settle time after target change (s)", value=st.power_match.settle_s, min=0, max=30
         )
 
-        async def save() -> None:
+        def save() -> None:
             """Validate the form values and persist the settings."""
             # ui.number yields None when a field is cleared: keep the current value then.
             pm = st.power_match
-            if not st.sync_profile:  # synced values come from intervals.icu only
+            if not st.sync_profile:  # synced values come from the profile connection only
                 st.ftp = int(ftp.value) if ftp.value is not None else st.ftp
                 st.weight_kg = float(weight.value) if weight.value is not None else st.weight_kg
-            st.intervals_athlete_id = athlete.value.strip() or "0"
-            st.auto_upload = bool(auto.value)
             if max_off.value is not None:
                 pm.max_offset_w = float(max_off.value)
             if settle.value is not None:
                 pm.settle_s = float(settle.value)
-            new_key = bool(key.value)
-            if new_key:
-                set_api_key(key.value.strip())
-                key.value = ""
             st.save()
             ui.notify("Settings saved", type="positive")
-            if new_key and st.sync_profile:
-                await sync_now()
 
-        async def test_key() -> None:
-            """Check the intervals.icu API key by fetching the athlete profile."""
-            k = key.value.strip() or get_api_key()
-            if not k:
-                ui.notify("Enter an API key first", type="warning")
-                return
-            from smart_trainer.sync.intervals import IntervalsClient
+        ui.button("Save", icon="save", on_click=save).props("color=positive").classes("mt-2")
 
-            c = IntervalsClient(k, athlete.value.strip() or "0")
-            try:
-                a = await c.athlete()
-                ui.notify(f"Connected as {a.get('name', 'athlete')}", type="positive")
-            except Exception as exc:
-                ui.notify(str(exc), type="negative")
-            finally:
-                await c.aclose()
+        ui.separator()
+        ui.label("Connections").classes("section-title mt-2")
 
-        with ui.row().classes("mt-2"):
-            ui.button("Save", icon="save", on_click=save).props("color=positive")
-            ui.button("Test connection", icon="wifi_tethering", on_click=test_key).props(
-                "color=secondary"
-            )
+        def toggle_auto() -> None:
+            """Persist the global automatic upload switch."""
+            st.auto_upload = bool(auto.value)
+            st.save()
+
+        auto = ui.switch(
+            "Upload rides automatically when finished", value=st.auto_upload, on_change=toggle_auto
+        ).tooltip("Each connection below can opt out of automatic uploads")
+        for conn in e.sync.connections():
+            ui.separator()
+            connection_card(conn, credentials_changed)
