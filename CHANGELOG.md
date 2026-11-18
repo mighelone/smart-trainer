@@ -11,6 +11,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 ## [Unreleased]
 
 ### Added
+- Logs are saved to `logs/smart-trainer.log` in the app data folder, rotated at ~1 MB (the last
+  five files are kept), so the packaged app keeps a log too.
 - Mini overlay: a compact always-on-top window with the key ride metrics and controls, for riding
   while watching a video in another window. Toggle it from the header (and **Expand** back) during a
   ride, or start with `--mini`.
