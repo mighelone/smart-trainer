@@ -1,4 +1,4 @@
-"""Entry point: `uv run smart-trainer [--fake] [--lan] [--native] [--port 8080]`."""
+"""Entry point: `uv run smart-trainer [--fake] [--lan] [--native] [--mini] [--port 8080]`."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from smart_trainer.config import APP_DIR, Settings, get_api_key
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
 from smart_trainer.ui import pages  # noqa: F401  (registers the pages)
-from smart_trainer.ui.pages import S
+from smart_trainer.ui.pages import FULL_SIZE, MINI_SIZE, S
 
 log = logging.getLogger("smart_trainer")
 _background: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
@@ -77,7 +77,16 @@ def run() -> None:
         default=frozen,
         help="open in a desktop window instead of the browser (needs the 'app' extra)",
     )
+    parser.add_argument(
+        "--mini",
+        action="store_true",
+        help="start as a small always-on-top overlay (implies --native)",
+    )
     args = parser.parse_args()
+    if args.mini:
+        args.native = True
+        S.start_mini = True
+        app.native.window_args["on_top"] = True
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
@@ -97,7 +106,7 @@ def run() -> None:
         host="0.0.0.0" if args.lan else "127.0.0.1",
         show=not args.no_browser,
         native=args.native,
-        window_size=(1280, 860) if args.native else None,
+        window_size=(MINI_SIZE if args.mini else FULL_SIZE) if args.native else None,
         favicon="🚴",
     )
 

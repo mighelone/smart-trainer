@@ -6,7 +6,7 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta
 
-from nicegui import ui
+from nicegui import app, ui
 
 from smart_trainer.ble.device import (
     DRIVERS,
@@ -46,9 +46,14 @@ class AppState:
     engine: Engine
     selected: Workout | None = None
     fake: bool = False
+    start_mini: bool = False
+    full_geometry: tuple[tuple[int, int], tuple[int, int]] | None = None
 
 
 S = AppState()
+
+MINI_SIZE = (1000, 210)  # native window size of the mini overlay (incl. title bar)
+FULL_SIZE = (1280, 860)  # size restored when the app was started in mini mode
 
 DOT_COLOR = {
     ConnState.CONNECTED: "#22c55e",
@@ -90,6 +95,9 @@ def frame(title: str) -> None:
                 ui.button(label, on_click=lambda p=path: ui.navigate.to(p)).props(
                     f"flat dense padding='6px 14px' color={'white' if active else 'grey-5'}"
                 ).classes("nav-btn" + (" active" if active else ""))
+            ui.button(icon="picture_in_picture_alt", on_click=enter_mini).props(
+                "flat dense padding='6px 10px' color=grey-5"
+            ).classes("nav-btn").tooltip("Mini overlay: stays on top of other windows")
         chips = ui.row().classes("gap-2")
 
     def refresh_chips() -> None:
@@ -114,11 +122,123 @@ def frame(title: str) -> None:
     ui.timer(2.0, refresh_chips)
 
 
+# ============================================================ WINDOW MODES
+async def enter_mini() -> None:
+    """Switch to the mini overlay: small, always-on-top window (native) and the /mini page."""
+    w = app.native.main_window
+    if w is not None:
+        S.full_geometry = (await w.get_size(), await w.get_position())
+        w.set_always_on_top(True)
+        w.resize(*MINI_SIZE)
+    ui.navigate.to("/mini")
+
+
+def restore_full_window() -> None:
+    """Restore the normal window: not on top, previous size and position (native only)."""
+    w = app.native.main_window
+    if w is None:
+        return
+    w.set_always_on_top(False)
+    if S.full_geometry:
+        (width, height), (x, y) = S.full_geometry
+        w.resize(width, height)
+        w.move(x, y)
+    else:
+        w.resize(*FULL_SIZE)
+
+
+def exit_mini() -> None:
+    """Leave the mini overlay and go back to the full ride page."""
+    restore_full_window()
+    ui.navigate.to("/")
+
+
+def start_ride() -> None:
+    """Start a ride with the selected workout (or a free ride)."""
+    try:
+        S.engine.start_ride(S.selected)
+    except RuntimeError as exc:
+        ui.notify(str(exc), type="warning")
+        return
+    ui.notify(f"Started: {S.selected.name if S.selected else 'free ride'}")
+
+
+def ride_status(e: Engine) -> list[str]:
+    """Status messages for the ride (pause, auto-pause, device warnings).
+
+    Args:
+        e (Engine): The application engine.
+
+    Returns:
+        list[str]: Messages to show, empty when all is well.
+    """
+    status = []
+    if e.manual_pause:
+        status.append("PAUSED")
+    elif e.state == RideState.RIDING and e.auto_paused:
+        status.append("Auto-paused: start pedalling")
+    status += e.snapshot.warnings
+    if e.device_for(Role.TRAINER) and not e.trainer_connected():
+        status.append("Trainer disconnected: reconnecting…")
+    return status
+
+
+def update_main_tiles(e: Engine, t_power: Tile, t_target: Tile, t_hr: Tile, t_cad: Tile) -> None:
+    """Update the power, target, heart-rate and cadence tiles from the engine state.
+
+    Args:
+        e (Engine): The application engine.
+        t_power (Tile): 3 s power tile.
+        t_target (Tile): Target power tile.
+        t_hr (Tile): Heart-rate tile.
+        t_cad (Tile): Cadence tile.
+    """
+    snap = e.snapshot
+    ftp = e.settings.ftp
+    pedal_id = e.selector.assignment.get(Role.POWER)
+    p3 = e.selector.avg_power(snap.power_source) if snap.power_source else None
+    src = (
+        "pedals"
+        if snap.power_source
+        and snap.power_source == pedal_id
+        and snap.power_source != e.selector.trainer_id
+        else "trainer"
+    )
+    sub = f"from {src}" + (
+        f" · trainer {fmt(snap.trainer_power)} W"
+        if snap.pedal_power is not None and snap.trainer_power is not None
+        else ""
+    )
+    zones = e.settings.power_zones
+    t_power.set(fmt(p3), sub)
+    t_power.set_zone(*power_zone(p3, ftp, zones))
+    target = e.current_target()
+    cmd = e.controller.last_command
+    t_target.set(
+        fmt(target) if target is not None else "--",
+        f"trainer command {cmd[1]:.0f} W"
+        if cmd and cmd[0] == Mode.ERG
+        else f"{e.controller.mode.value} mode",
+    )
+    t_target.set_zone(*power_zone(target, ftp, zones))
+    max_hr = e.settings.max_hr
+    t_hr.set(fmt(snap.hr), f"{snap.hr / max_hr:.0%} of max" if snap.hr and max_hr else "")
+    t_hr.set_zone(*hr_zone(snap.hr, e.settings.hr_zones))
+    st = e.runner.current()[1] if e.runner else None
+    t_cad.set(fmt(snap.cadence), f"target {st.cadence} rpm" if st and st.cadence else "")
+
+
 # ===================================================================== RIDE
 @ui.page("/")
 def ride_page() -> None:
     """Ride page: live metrics, workout chart and ride controls."""
     e = S.engine
+    if S.start_mini:
+        S.start_mini = False
+        if not e.unfinished_sessions():
+            ui.navigate.to("/mini")
+            return
+        restore_full_window()  # an unfinished session needs the full page's dialog
     frame("Ride")
     ftp = e.settings.ftp
 
@@ -164,7 +284,7 @@ def ride_page() -> None:
 
         # ---------------------------------------------------------- controls
         with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-3 w-full"):
-            btn_start = ui.button("Start", icon="play_arrow", on_click=lambda: start()).props(
+            btn_start = ui.button("Start", icon="play_arrow", on_click=start_ride).props(
                 "color=positive size=lg padding='8px 28px'"
             )
             btn_pause = ui.button("Pause", icon="pause", on_click=lambda: e.toggle_pause()).props(
@@ -247,15 +367,6 @@ def ride_page() -> None:
         else:
             c.erg_target = v
 
-    def start() -> None:
-        """Start a ride with the selected workout (or a free ride)."""
-        try:
-            e.start_ride(S.selected)
-        except RuntimeError as exc:
-            ui.notify(str(exc), type="warning")
-            return
-        ui.notify(f"Started: {S.selected.name if S.selected else 'free ride'}")
-
     async def do_finish(dialog, upload: bool) -> None:
         """Finish the ride and notify the result.
 
@@ -337,38 +448,8 @@ def ride_page() -> None:
         ensure_chart()
         snap = e.snapshot
         riding = e.state == RideState.RIDING
-        pedal_id = e.selector.assignment.get(Role.POWER)
-        p3 = e.selector.avg_power(snap.power_source) if snap.power_source else None
-        src = (
-            "pedals"
-            if snap.power_source
-            and snap.power_source == pedal_id
-            and snap.power_source != e.selector.trainer_id
-            else "trainer"
-        )
-        sub = f"from {src}" + (
-            f" · trainer {fmt(snap.trainer_power)} W"
-            if snap.pedal_power is not None and snap.trainer_power is not None
-            else ""
-        )
-        zones = e.settings.power_zones
-        t_power.set(fmt(p3), sub)
-        t_power.set_zone(*power_zone(p3, ftp, zones))
-        target = e.current_target()
-        cmd = e.controller.last_command
-        t_target.set(
-            fmt(target) if target is not None else "--",
-            f"trainer command {cmd[1]:.0f} W"
-            if cmd and cmd[0] == Mode.ERG
-            else f"{e.controller.mode.value} mode",
-        )
-        t_target.set_zone(*power_zone(target, ftp, zones))
-        max_hr = e.settings.max_hr
-        t_hr.set(fmt(snap.hr), f"{snap.hr / max_hr:.0%} of max" if snap.hr and max_hr else "")
-        t_hr.set_zone(*hr_zone(snap.hr, e.settings.hr_zones))
+        update_main_tiles(e, t_power, t_target, t_hr, t_cad)
         r = e.runner
-        st = r.current()[1] if r else None
-        t_cad.set(fmt(snap.cadence), f"target {st.cadence} rpm" if st and st.cadence else "")
         t_speed.set(fmt(snap.speed_kmh, 1))
         t_bal.set(
             f"{snap.balance_left:.0f}/{100 - snap.balance_left:.0f}" if snap.balance_left else "--"
@@ -400,14 +481,7 @@ def ride_page() -> None:
             )
             step_bar.set_value(0)
             step_card.set_visibility(sel is not None)
-        status = []
-        if e.manual_pause:
-            status.append("PAUSED")
-        elif riding and e.auto_paused:
-            status.append("Auto-paused: start pedalling")
-        status += snap.warnings
-        if e.device_for(Role.TRAINER) and not e.trainer_connected():
-            status.append("Trainer disconnected: reconnecting…")
+        status = ride_status(e)
         warn.set_text(" · ".join(status))
         warn.set_visibility(bool(status))
         btn_start.set_visibility(not riding)
@@ -470,6 +544,79 @@ def ride_page() -> None:
             refresh_chart()
 
     ui.timer(0.5, loop)
+
+
+# ===================================================================== MINI
+@ui.page("/mini")
+def mini_page() -> None:
+    """Compact always-on-top overlay: key metrics and basic ride controls."""
+    e = S.engine
+    apply_theme()
+    with ui.column().classes("mini-page"):
+        with ui.row().classes("w-full no-wrap items-stretch gap-2"):
+            with ui.element("div").classes("metric-grid mini-grid"):
+                t_power = Tile("Power", "W", icon="bolt", size="sm", accent="#facc15")
+                t_target = Tile("Target", "W", icon="adjust", size="sm", accent="#4f8cff")
+                t_hr = Tile("HR", "bpm", icon="favorite", size="sm", accent="#f43f5e")
+                t_cad = Tile("Cadence", "rpm", icon="autorenew", size="sm", accent="#a78bfa")
+                t_step = Tile("Interval left", icon="timer", size="sm")
+            with ui.column().classes("gap-1 justify-center shrink-0"):
+                btn_start = (
+                    ui.button(icon="play_arrow", on_click=start_ride)
+                    .props("color=positive dense")
+                    .tooltip("Start")
+                )
+                btn_pause = ui.button(icon="pause", on_click=lambda: e.toggle_pause()).props(
+                    "color=primary dense"
+                )
+                with ui.row().classes("gap-1 no-wrap") as intensity_box:
+                    ui.button(icon="remove", on_click=lambda: e.change_intensity(-0.05)).props(
+                        "color=secondary dense"
+                    ).tooltip("Intensity -5%")
+                    ui.button(icon="add", on_click=lambda: e.change_intensity(0.05)).props(
+                        "color=secondary dense"
+                    ).tooltip("Intensity +5%")
+                ui.button(icon="open_in_full", on_click=exit_mini).props(
+                    "color=secondary dense"
+                ).tooltip("Back to the full app")
+        with ui.row().classes("w-full items-center no-wrap gap-3"):
+            step_label = ui.label("").classes("mini-step")
+            step_bar = (
+                ui.linear_progress(value=0, show_value=False)
+                .props("rounded size=5px color=primary instant-feedback")
+                .classes("step-progress grow")
+            )
+
+    def refresh() -> None:
+        """Update tiles, step line and buttons from the engine state."""
+        riding = e.state == RideState.RIDING
+        update_main_tiles(e, t_power, t_target, t_hr, t_cad)
+        r = e.runner
+        if r:
+            i, st, into, left = r.current()
+            t_step.set(fmt_time(left), f"{i + 1}/{len(r.workout.steps)} · {r.intensity:.0%}")
+            label = st.text or ("Free ride" if st.free_ride else f"Interval {i + 1}")
+            text = f"{label} · {fmt_time(r.elapsed)} of {fmt_time(r.workout.duration_s)}"
+            step_bar.set_value(min(1.0, into / st.duration_s) if st.duration_s else 0)
+        else:
+            t_step.set("--", "free ride" if riding else "")
+            sel = None if riding else S.selected
+            text = (
+                f"Free ride · {fmt_time(e.ride_seconds)}"
+                if riding
+                else (sel.name if sel else "Free ride: press start")
+            )
+            step_bar.set_value(0)
+        status = ride_status(e)
+        step_label.set_text(" · ".join(status) if status else text)
+        step_label.classes(add="mini-warn" if status else "", remove="" if status else "mini-warn")
+        btn_start.set_visibility(not riding)
+        btn_pause.set_visibility(riding)
+        btn_pause.props(f"icon={'play_arrow' if e.manual_pause else 'pause'}")
+        intensity_box.set_visibility(riding and r is not None)
+
+    refresh()
+    ui.timer(0.5, refresh)
 
 
 # ================================================================= WORKOUTS

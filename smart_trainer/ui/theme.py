@@ -111,6 +111,21 @@ body, .q-page, .nicegui-content {
 .metric-lg .metric-value { font-size: clamp(3rem, 5.2vw, 4.6rem); }
 .metric-md { min-height: 112px; }
 .metric-md .metric-value { font-size: clamp(2rem, 3.2vw, 2.6rem); }
+.metric-sm { padding: 8px 12px 6px; }
+.metric-sm .metric-head { height: 18px; }
+.metric-sm .metric-label { font-size: 0.62rem; letter-spacing: 0.08em; }
+.metric-sm .metric-body { margin-top: 2px; }
+.metric-sm .metric-value { font-size: 2.1rem; }
+.metric-sm .metric-sub { min-height: 1rem; margin-top: 2px; font-size: 0.7rem; }
+
+/* ------------------------------------------------------------ mini overlay */
+.mini-page { width: 100%; padding: 8px 10px; gap: 6px; }
+.mini-grid { gap: 8px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.mini-step {
+  font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 60%;
+}
+.mini-step.mini-warn { color: #fbbf24; font-weight: 600; }
 
 /* -------------------------------------------------------------- ride page */
 .status-bar {

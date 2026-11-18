@@ -8,6 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 (`[Unreleased]` is skipped). To release, rename `[Unreleased]` to the new version and date, then
 push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
+## [Unreleased]
+
+### Added
+- Mini overlay: a compact always-on-top window with the key ride metrics and controls, for riding
+  while watching a video in another window. Toggle it from the header (and **Expand** back) during a
+  ride, or start with `--mini`.
+
 ## [0.2.0] - 2026-11-17
 
 ### Added
