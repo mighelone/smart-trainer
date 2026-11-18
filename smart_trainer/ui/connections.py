@@ -16,7 +16,6 @@ from fastapi.responses import HTMLResponse
 from nicegui import app, ui
 
 from smart_trainer.config import get_api_key, get_secret, set_secret
-from smart_trainer.core.engine import Engine
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.sync.intervals import IntervalsConnection
 from smart_trainer.sync.strava import StravaConnection, authorize_url
@@ -25,7 +24,7 @@ log = logging.getLogger(__name__)
 
 # Called after credentials change, e.g. to sync the profile right away
 OnChange = Callable[[], Awaitable[None]]
-Renderer = Callable[[Engine, Connection, OnChange], None]
+Renderer = Callable[[Connection, OnChange], None]
 RENDERERS: dict[str, Renderer] = {}
 STRAVA_CALLBACK = "/connections/strava/callback"
 _strava_states: set[str] = set()  # pending OAuth requests
@@ -49,11 +48,10 @@ def settings_renderer(conn_id: str) -> Callable[[Renderer], Renderer]:
     return deco
 
 
-def connection_card(e: Engine, conn: Connection, on_change: OnChange) -> None:
+def connection_card(conn: Connection, on_change: OnChange) -> None:
     """Render the settings card of a connection.
 
     Args:
-        e (Engine): The application engine.
         conn (Connection): The connection.
         on_change (OnChange): Called after the connection's credentials change.
     """
@@ -64,7 +62,7 @@ def connection_card(e: Engine, conn: Connection, on_change: OnChange) -> None:
         cs.enabled = bool(enabled.value)
         if auto is not None:
             cs.auto_upload = bool(auto.value)
-        e.settings.save()
+        conn.settings.save()
 
     with ui.row().classes("items-center w-full mt-2"):
         ui.label(conn.name).classes("section-title")
@@ -76,7 +74,7 @@ def connection_card(e: Engine, conn: Connection, on_change: OnChange) -> None:
             "Upload automatically after each ride", value=cs.auto_upload, on_change=persist
         )
     if renderer := RENDERERS.get(conn.id):
-        renderer(e, conn, on_change)
+        renderer(conn, on_change)
 
 
 async def _test(conn: Connection, **kw) -> None:
@@ -94,11 +92,10 @@ async def _test(conn: Connection, **kw) -> None:
 
 # ============================================================ intervals.icu
 @settings_renderer(IntervalsConnection.id)
-def intervals_settings(e: Engine, conn: Connection, on_change: OnChange) -> None:
+def intervals_settings(conn: Connection, on_change: OnChange) -> None:
     """intervals.icu: API key and athlete id.
 
     Args:
-        e (Engine): The application engine.
         conn (Connection): The intervals.icu connection.
         on_change (OnChange): Called after the API key changes.
     """
@@ -123,7 +120,7 @@ def intervals_settings(e: Engine, conn: Connection, on_change: OnChange) -> None
             conn.set_api_key(new_key)
             key.value = ""
             key.props('placeholder="(saved)"')
-        e.settings.save()
+        conn.settings.save()
         ui.notify("intervals.icu settings saved", type="positive")
         if new_key:
             await on_change()
@@ -155,11 +152,10 @@ def strava_redirect_uri() -> str:
 
 
 @settings_renderer(StravaConnection.id)
-def strava_settings(e: Engine, conn: Connection, on_change: OnChange) -> None:
+def strava_settings(conn: Connection, on_change: OnChange) -> None:
     """Strava: API application credentials and the OAuth connection.
 
     Args:
-        e (Engine): The application engine.
         conn (Connection): The Strava connection.
         on_change (OnChange): Called after connecting.
     """
@@ -199,12 +195,12 @@ def strava_settings(e: Engine, conn: Connection, on_change: OnChange) -> None:
             set_secret(conn.id, "client_secret", secret)
             client_secret.value = ""
             client_secret.props('placeholder="(saved)"')
-        e.settings.save()
+        conn.settings.save()
         return bool(conn.client_id and get_secret(conn.id, "client_secret"))
 
     def connect() -> None:
         """Open the Strava authorization page in the system browser."""
-        if e.settings._readonly:
+        if conn.settings._readonly:
             ui.notify("Demo mode: connections can't be changed", type="warning")
             return
         if not save_credentials():
@@ -284,7 +280,7 @@ async def strava_callback(
             "Allow 'Upload your activities' so rides can be uploaded. Connect again.",
             400,
         )
-    conn = StravaConnection(S.engine.settings)
+    conn = StravaConnection(S.settings)
     try:
         name = await conn.authorize(code)
     except Exception as exc:

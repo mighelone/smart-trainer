@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from contextlib import AsyncExitStack
 
 from nicegui import app, native, ui
 
@@ -24,9 +25,10 @@ from smart_trainer.ui.pages import S
 
 log = logging.getLogger("smart_trainer")
 _background: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
+_lifetime = AsyncExitStack()  # enters the engine at startup, exits it at shutdown
 
 
-def _startup(use_fake: bool) -> None:
+async def _startup(use_fake: bool) -> None:
     """Load settings, create the engine and its devices, and start it.
 
     Args:
@@ -42,23 +44,25 @@ def _startup(use_fake: bool) -> None:
         settings._readonly = True
         sessions = APP_DIR / "demo-sessions"
         sessions.mkdir(parents=True, exist_ok=True)
-    engine = Engine(settings, sessions=sessions)
-    S.engine, S.fake = engine, use_fake
+    engine = Engine.from_settings(
+        settings, sessions=sessions, connections=lambda: registry.all_connections(settings)
+    )
+    S.engine, S.settings, S.fake = engine, settings, use_fake
     if use_fake:
-        engine.add_device(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
-        engine.add_device(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
-        engine.add_device(fake.FakeHeartRate(), [Role.HR])
+        engine.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
+        engine.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
+        engine.devices.add(fake.FakeHeartRate(), [Role.HR])
     else:
         for pd in settings.devices.values():
             try:
-                engine.add_device(make_device(pd.driver, pd.address, pd.name))
+                engine.devices.add(make_device(pd.driver, pd.address, pd.name))
             except KeyError:
                 log.warning("unknown driver %s for %s", pd.driver, pd.name)
-    engine.start()
+    await _lifetime.enter_async_context(engine)
     log.info("engine started (data dir: %s)", APP_DIR)
-    if not use_fake and settings.sync_profile and registry.connected(settings, Capability.PROFILE):
+    if not use_fake and settings.sync_profile and engine.sync.connected(Capability.PROFILE):
         # In the background: a slow or failing network must not block launch
-        _background.add(task := asyncio.create_task(engine.sync_profile()))
+        _background.add(task := asyncio.create_task(engine.sync.sync_profile()))
         task.add_done_callback(_background.discard)
 
 
@@ -88,7 +92,7 @@ def run() -> None:
     )
 
     app.on_startup(lambda: _startup(args.fake))
-    app.on_shutdown(lambda: S.engine.shutdown())
+    app.on_shutdown(_lifetime.aclose)
     port = args.port
     if port is None:
         # A native window doesn't need a stable URL, so avoid clashing with other apps;

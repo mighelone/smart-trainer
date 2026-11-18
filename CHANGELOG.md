@@ -24,6 +24,14 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 - **History** shows the upload status per service, and **Upload** retries only where it's missing
   or failed.
 - Settings are migrated automatically. Existing sessions keep their intervals.icu upload status.
+- Split the app core (`Engine`) into focused components: `DeviceHub` (devices and roles),
+  `Ride` (the ride in progress), `CalibrationService`, `SessionStore` (session files, FIT
+  export, recovery) and `SyncService` (uploads and profile sync). `Engine` now only wires them
+  together and runs the control loop. Its lifecycle is an async context manager
+  (`async with engine:`) instead of `start()`/`shutdown()`.
+- Sync goes through the connections, which are injected at startup
+  (`Engine.from_settings(connections=...)`), so another platform can be added without touching
+  the core.
 
 ## [0.2.0] - 2026-11-17
 
