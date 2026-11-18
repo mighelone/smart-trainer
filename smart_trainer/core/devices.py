@@ -3,43 +3,66 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from typing import Protocol
 
-from smart_trainer.ble.device import ControllableTrainer, Device
-from smart_trainer.config import PairedDevice, Settings
-from smart_trainer.core.control import TrainerController
-from smart_trainer.core.sources import SourceSelector
-from smart_trainer.core.state import ConnState, Role
+from smart_trainer.ble.device import Device, ReadingCallback
+from smart_trainer.config import PairedDevice
+from smart_trainer.core.state import Assignment, ConnState, Role
+
+AssignmentListener = Callable[[Assignment, Device | None], None]
+"""Notified with the new assignment and the trainer device (if any) on every change."""
+
+
+class DeviceConfig(Protocol):
+    """The part of the settings the device hub reads and persists.
+
+    :class:`~smart_trainer.config.Settings` satisfies it structurally.
+
+    Attributes:
+        devices (dict[str, PairedDevice]): Paired devices by id.
+        role_assignment (dict[str, str]): Device id by role name.
+        power_source (str): ``"pedals"`` or ``"trainer"``: preferred power source.
+    """
+
+    devices: dict[str, PairedDevice]
+    role_assignment: dict[str, str]
+    power_source: str
+
+    def save(self) -> None:
+        """Persist the configuration."""
+        ...
 
 
 class DeviceHub(Mapping[str, Device]):
     """Active devices by id, plus their role assignment.
 
-    The role assignment lives in the settings. Every change is pushed to the source
-    selector (which device provides which metric) and to the trainer controller (which
-    trainer to drive, and whether pedal power corrects it).
-
-    Attributes:
-        settings (Settings): User settings holding pairings and role assignments.
-        selector (SourceSelector): Receives the readings and the assignment.
-        controller (TrainerController): Receives the trainer to control.
+    The hub is the single owner of the role assignment: it is saved in its
+    :class:`DeviceConfig` and published as an immutable :attr:`assignment`. The hub
+    knows nothing about who consumes readings or assignments; it only calls the
+    callbacks it is given.
     """
 
     def __init__(
-        self, settings: Settings, selector: SourceSelector, controller: TrainerController
+        self,
+        config: DeviceConfig,
+        on_reading: ReadingCallback,
+        on_change: AssignmentListener = lambda assignment, trainer: None,
     ) -> None:
         """Initialize the hub and apply the saved role assignment.
 
         Args:
-            settings (Settings): User settings.
-            selector (SourceSelector): Source selector to feed.
-            controller (TrainerController): Trainer controller to configure.
+            config (DeviceConfig): Pairings, role assignment and power source, persisted
+                on every change.
+            on_reading (ReadingCallback): Subscribed to every added device's readings.
+            on_change (AssignmentListener): Called whenever the assignment changes
+                (including once now, with the saved assignment).
         """
-        self.settings = settings
-        self.selector = selector
-        self.controller = controller
+        self._config = config
+        self._on_reading = on_reading
+        self._on_change = on_change
         self._devices: dict[str, Device] = {}
-        self._apply_assignment()
+        self._notify()
 
     # ------------------------------------------------------------- Mapping API
     def __getitem__(self, device_id: str) -> Device:
@@ -81,24 +104,24 @@ class DeviceHub(Mapping[str, Device]):
         if old is not None:
             asyncio.ensure_future(old.stop())
         self._devices[dev.id] = dev
-        dev.subscribe(self.selector.on_reading)
+        dev.subscribe(self._on_reading)
         for role in roles or []:
-            self.settings.role_assignment[role.value] = dev.id
-        self._apply_assignment()
+            self._config.role_assignment[role.value] = dev.id
+        self._notify()
         dev.start()
 
     def pair(self, dev: Device, roles: list[Role]) -> None:
-        """Pair a device: persist it in the settings and add it.
+        """Pair a device: persist it in the config and add it.
 
         Args:
             dev (Device): The device to pair.
             roles (list[Role]): Roles to assign to the device.
         """
-        self.settings.devices[dev.id] = PairedDevice(
+        self._config.devices[dev.id] = PairedDevice(
             address=dev.address, name=dev.name, driver=dev.DRIVER
         )
         self.add(dev, roles)
-        self.settings.save()
+        self._config.save()
 
     async def remove(self, device_id: str) -> None:
         """Stop and forget a device, removing its pairing and role assignments.
@@ -109,12 +132,12 @@ class DeviceHub(Mapping[str, Device]):
         dev = self._devices.pop(device_id, None)
         if dev:
             await dev.stop()
-        self.settings.devices.pop(device_id, None)
-        for role, did in list(self.settings.role_assignment.items()):
+        self._config.devices.pop(device_id, None)
+        for role, did in list(self._config.role_assignment.items()):
             if did == device_id:
-                del self.settings.role_assignment[role]
-        self._apply_assignment()
-        self.settings.save()
+                del self._config.role_assignment[role]
+        self._notify()
+        self._config.save()
 
     async def stop_all(self) -> None:
         """Stop every device."""
@@ -130,9 +153,9 @@ class DeviceHub(Mapping[str, Device]):
             roles (list[Role]): Roles to assign to it.
         """
         for role in roles:
-            self.settings.role_assignment[role.value] = device_id
-        self._apply_assignment()
-        self.settings.save()
+            self._config.role_assignment[role.value] = device_id
+        self._notify()
+        self._config.save()
 
     def set_power_source(self, source: str) -> None:
         """Choose the preferred power source and persist it.
@@ -140,43 +163,30 @@ class DeviceHub(Mapping[str, Device]):
         Args:
             source (str): ``"pedals"`` or ``"trainer"``.
         """
-        self.settings.power_source = source
-        self.settings.save()
-        self._apply_assignment()
+        self._config.power_source = source
+        self._config.save()
+        self._notify()
 
-    def _apply_assignment(self) -> None:
-        """Push the role assignment from the settings to the selector and controller."""
-        ra = {Role(k): v for k, v in self.settings.role_assignment.items()}
-        trainer_id = ra.get(Role.TRAINER)
-        if self.settings.power_source == "trainer" and trainer_id:
-            ra[Role.POWER] = trainer_id
-        self.selector.assignment = ra
-        self.selector.trainer_id = trainer_id
-        dev = self._devices.get(trainer_id) if trainer_id else None
-        self.controller.trainer = dev if isinstance(dev, ControllableTrainer) else None
-        self.controller.use_pedals = self.settings.power_source == "pedals" and ra.get(
-            Role.POWER
-        ) not in (None, trainer_id)
-        self.controller.force_resend()
+    def _notify(self) -> None:
+        """Tell the listener the assignment (or the trainer device) may have changed."""
+        self._on_change(self.assignment, self.device_for(Role.TRAINER))
 
     # ------------------------------------------------------------------ queries
     @property
-    def trainer_id(self) -> str | None:
-        """Id of the device assigned as trainer.
+    def assignment(self) -> Assignment:
+        """The effective role assignment, derived from the config on every access.
+
+        When the rider prefers trainer power (and a trainer is assigned), the trainer
+        also takes the power role.
 
         Returns:
-            str | None: The trainer id, or ``None``.
+            Assignment: Roles by device id, with the power-source preference applied.
         """
-        return self.selector.trainer_id
-
-    @property
-    def power_id(self) -> str | None:
-        """Id of the device providing power (pedals, or the trainer itself).
-
-        Returns:
-            str | None: The power source id, or ``None``.
-        """
-        return self.selector.assignment.get(Role.POWER)
+        roles = {Role(k): v for k, v in self._config.role_assignment.items()}
+        trainer_id = roles.get(Role.TRAINER)
+        if self._config.power_source == "trainer" and trainer_id:
+            roles[Role.POWER] = trainer_id
+        return Assignment(roles)
 
     def device_for(self, role: Role) -> Device | None:
         """Get the device assigned to a role.
@@ -187,7 +197,7 @@ class DeviceHub(Mapping[str, Device]):
         Returns:
             Device | None: The assigned device, or ``None``.
         """
-        did = self.selector.assignment.get(role)
+        did = self.assignment.get(role)
         return self._devices.get(did) if did else None
 
     def trainer_connected(self) -> bool:

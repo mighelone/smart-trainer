@@ -59,7 +59,8 @@ class Engine:
         tick_s (float): Loop interval in seconds.
         run_loop (bool): Whether entering the context starts the 1 Hz loop. Turn it off
             to drive :meth:`tick` by hand (e.g. in tests with simulated time).
-        snapshot (Snapshot): Latest effective metrics.
+        snapshot (Snapshot): Latest effective metrics, published by :meth:`tick`
+            (the values used for control and recording; read-only for consumers).
     """
 
     messages: deque[str]
@@ -72,7 +73,7 @@ class Engine:
     ride: Ride
     tick_s: float = 1.0
     run_loop: bool = True
-    snapshot: Snapshot = field(default_factory=Snapshot)
+    snapshot: Snapshot = field(default_factory=Snapshot, init=False)
     _task: asyncio.Task | None = field(default=None, init=False, repr=False)
 
     @classmethod
@@ -100,7 +101,9 @@ class Engine:
         messages: deque[str] = deque(maxlen=20)
         selector = SourceSelector()
         controller = TrainerController(settings.power_match)
-        devices = DeviceHub(settings, selector, controller)
+        devices = DeviceHub(
+            settings, on_reading=selector.on_reading, on_change=controller.configure
+        )
 
         # Sync and calibration need to know whether a ride is active, and the ride needs
         # the calibration's blocker: the closure binds ``ride`` once it exists below.
@@ -186,14 +189,9 @@ class Engine:
             now_wall (float | None): Current unix time; defaults to ``time.time()``.
         """
         now_wall = now_wall or time.time()
-        snap = self.snapshot = self.selector.snapshot()
-        self.ride.tick(snap, now_wall)
-        if self.calibration.suspends_control(self.devices.trainer_id):
+        assignment = self.devices.assignment
+        snapshot = self.snapshot = self.selector.create_snapshot(assignment)
+        self.ride.tick(snapshot, now_wall)
+        if self.calibration.suspends_control(assignment.trainer_id):
             return  # never send resistance commands while the trainer spins down
-        await self.controller.apply(
-            snap,
-            self.selector.avg_power(self.devices.power_id),
-            self.selector.avg_power(self.devices.trainer_id),
-            self.devices.trainer_connected(),
-            now_wall,
-        )
+        await self.controller.apply(snapshot, self.devices.trainer_connected(), now_wall)

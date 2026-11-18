@@ -342,13 +342,11 @@ def ride_page() -> None:
         ensure_chart()
         snap = e.snapshot
         riding = e.ride.state == RideState.RIDING
-        pedal_id = e.selector.assignment.get(Role.POWER)
-        p3 = e.selector.avg_power(snap.power_source) if snap.power_source else None
+        assignment = e.devices.assignment
+        p3 = snap.power_avg
         src = (
             "pedals"
-            if snap.power_source
-            and snap.power_source == pedal_id
-            and snap.power_source != e.selector.trainer_id
+            if assignment.has_pedals and snap.power_source == assignment.power_id
             else "trainer"
         )
         sub = f"from {src}" + (
@@ -632,7 +630,7 @@ def devices_page() -> None:
         """Redraw the list of paired devices."""
         paired.clear()
         roles_by_dev: dict[str, list[str]] = {}
-        for role, did in e.selector.assignment.items():
+        for role, did in e.devices.assignment.roles.items():
             roles_by_dev.setdefault(did, []).append(role.value)
         with paired:
             if not e.devices:
