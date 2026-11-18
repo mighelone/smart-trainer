@@ -9,17 +9,23 @@ Each concern lives in its own component, exposed as an attribute:
 - :attr:`Engine.sync` (:class:`SyncService`): uploads and profile sync.
 
 The UI only reads component state and calls component methods, so the core is
-UI-agnostic.
+UI-agnostic. The engine is an async context manager that owns the lifecycle::
+
+    async with Engine.from_settings(settings) as engine:
+        ...  # the loop runs; on exit the loop, devices and recorder are stopped
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
 from smart_trainer.config import Settings, sessions_dir
 from smart_trainer.core.calibration import CalibrationService
@@ -51,6 +57,8 @@ class Engine:
         calibration (CalibrationService): Device calibration.
         ride (Ride): The ride in progress.
         tick_s (float): Loop interval in seconds.
+        run_loop (bool): Whether entering the context starts the 1 Hz loop. Turn it off
+            to drive :meth:`tick` by hand (e.g. in tests with simulated time).
         snapshot (Snapshot): Latest effective metrics.
     """
 
@@ -63,6 +71,7 @@ class Engine:
     calibration: CalibrationService
     ride: Ride
     tick_s: float = 1.0
+    run_loop: bool = True
     snapshot: Snapshot = field(default_factory=Snapshot)
     _task: asyncio.Task | None = field(default=None, init=False, repr=False)
 
@@ -73,6 +82,7 @@ class Engine:
         sessions: Path | None = None,
         tick_s: float = 1.0,
         sync_provider: ProviderFactory | None = None,
+        run_loop: bool = True,
     ) -> Engine:
         """Build the default component graph and the engine around it.
 
@@ -82,9 +92,10 @@ class Engine:
             tick_s (float): Loop interval in seconds.
             sync_provider (ProviderFactory | None): Creates the sync provider; without
                 one, uploads and profile sync are unavailable.
+            run_loop (bool): Whether entering the context starts the 1 Hz loop.
 
         Returns:
-            Engine: A ready engine (call :meth:`start` to run the loop).
+            Engine: A ready engine; enter it with ``async with`` to run it.
         """
         messages: deque[str] = deque(maxlen=20)
         selector = SourceSelector()
@@ -115,20 +126,47 @@ class Engine:
             calibration=calibration,
             ride=ride,
             tick_s=tick_s,
+            run_loop=run_loop,
         )
 
-    # --------------------------------------------------------------------- loop
-    def start(self) -> None:
-        """Start the engine loop if not already running."""
-        if self._task is None:
-            self._task = asyncio.create_task(self._loop(), name="engine")
+    # ---------------------------------------------------------------- lifecycle
+    async def __aenter__(self) -> Self:
+        """Start the loop (unless ``run_loop`` is off).
 
-    async def shutdown(self) -> None:
-        """Stop the loop and all devices, leaving any active session recoverable."""
-        if self._task:
+        Returns:
+            Self: The engine.
+
+        Raises:
+            RuntimeError: If the engine is already running.
+        """
+        if self._task is not None:
+            raise RuntimeError("Engine is already running")
+        if self.run_loop:
+            self._task = asyncio.create_task(self._loop(), name="engine")
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        """Stop the loop and all devices, leaving any active session recoverable.
+
+        Args:
+            exc_type (type[BaseException] | None): Exception type, if the block raised.
+            exc (BaseException | None): The exception, if the block raised.
+            tb (TracebackType | None): Its traceback.
+        """
+        if self._task is not None:
             self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
         await self.devices.stop_all()
-        self.ride.close()
+        self.ride.close()  # not finished: the session stays 'active', hence recoverable
+
+    # --------------------------------------------------------------------- loop
 
     async def _loop(self) -> None:
         """Run :meth:`tick` every ``tick_s`` seconds until cancelled."""

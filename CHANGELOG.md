@@ -14,7 +14,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 - Split the app core (`Engine`) into focused components: `DeviceHub` (devices and roles),
   `Ride` (the ride in progress), `CalibrationService`, `SessionStore` (session files, FIT
   export, recovery) and `SyncService` (uploads and profile sync). `Engine` now only wires them
-  together and runs the control loop.
+  together and runs the control loop. Its lifecycle is an async context manager
+  (`async with engine:`) instead of `start()`/`shutdown()`.
 - Sync goes through the `SyncProvider` interface; the intervals.icu client is injected at
   startup, so another platform can be added without touching the core.
 

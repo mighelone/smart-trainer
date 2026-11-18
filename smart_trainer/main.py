@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from contextlib import AsyncExitStack
 
 from nicegui import app, native, ui
 
@@ -20,9 +21,10 @@ from smart_trainer.ui.pages import S
 
 log = logging.getLogger("smart_trainer")
 _background: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
+_lifetime = AsyncExitStack()  # enters the engine at startup, exits it at shutdown
 
 
-def _startup(use_fake: bool) -> None:
+async def _startup(use_fake: bool) -> None:
     """Load settings, create the engine and its devices, and start it.
 
     Args:
@@ -52,7 +54,7 @@ def _startup(use_fake: bool) -> None:
                 engine.devices.add(make_device(pd.driver, pd.address, pd.name))
             except KeyError:
                 log.warning("unknown driver %s for %s", pd.driver, pd.name)
-    engine.start()
+    await _lifetime.enter_async_context(engine)
     log.info("engine started (data dir: %s)", APP_DIR)
     if not use_fake and settings.sync_profile and get_api_key():
         # In the background: a slow or failing network must not block launch
@@ -86,7 +88,7 @@ def run() -> None:
     )
 
     app.on_startup(lambda: _startup(args.fake))
-    app.on_shutdown(lambda: S.engine.shutdown())
+    app.on_shutdown(_lifetime.aclose)
     port = args.port
     if port is None:
         # A native window doesn't need a stable URL, so avoid clashing with other apps;
