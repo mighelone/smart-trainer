@@ -98,7 +98,7 @@ def frame(title: str) -> None:
                 ).classes("nav-btn" + (" active" if active else ""))
             ui.button(icon="picture_in_picture_alt", on_click=enter_mini).props(
                 "flat dense padding='6px 10px' color=grey-5"
-            ).classes("nav-btn").tooltip("Mini overlay: stays on top of other windows")
+            ).classes("nav-btn").mark("mini").tooltip("Mini overlay: stays on top of other windows")
         chips = ui.row().classes("gap-2")
 
     def refresh_chips() -> None:
@@ -588,10 +588,13 @@ def mini_page() -> None:
                 btn_start = (
                     ui.button(icon="play_arrow", on_click=start_ride)
                     .props("color=positive dense")
+                    .mark("mini-start")
                     .tooltip("Start")
                 )
-                btn_pause = ui.button(icon="pause", on_click=lambda: e.toggle_pause()).props(
-                    "color=primary dense"
+                btn_pause = (
+                    ui.button(icon="pause", on_click=lambda: e.toggle_pause())
+                    .props("color=primary dense")
+                    .mark("mini-pause")
                 )
                 with ui.row().classes("gap-1 no-wrap") as intensity_box:
                     ui.button(icon="remove", on_click=lambda: e.change_intensity(-0.05)).props(
@@ -599,10 +602,10 @@ def mini_page() -> None:
                     ).tooltip("Intensity -5%")
                     ui.button(icon="add", on_click=lambda: e.change_intensity(0.05)).props(
                         "color=secondary dense"
-                    ).tooltip("Intensity +5%")
+                    ).mark("mini-plus").tooltip("Intensity +5%")
                 ui.button(icon="open_in_full", on_click=exit_mini).props(
                     "color=secondary dense"
-                ).tooltip("Back to the full app")
+                ).mark("mini-expand").tooltip("Back to the full app")
         with ui.row().classes("w-full items-center no-wrap gap-3"):
             step_label = ui.label("").classes("mini-step")
             step_bar = (

@@ -71,6 +71,8 @@ build-backend = "hatchling.build"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# NiceGUI simulated user (`user` fixture) for the UI tests in tests/test_ui.py
+addopts = ["-p", "nicegui.testing.user_plugin"]
 
 [tool.coverage.run]
 source = ["smart_trainer"]
