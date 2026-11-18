@@ -36,7 +36,19 @@ uv run smart-trainer          # opens http://127.0.0.1:8080
 uv run smart-trainer --fake   # demo mode with simulated devices (separate data, no uploads)
 uv run smart-trainer --native # desktop window (`uv sync --extra app`)
 uv run smart-trainer --lan    # also reachable from an iPad/phone at http://<your-mac>.local:8080
+uv run smart-trainer --mini   # start as a small always-on-top overlay (implies --native)
 ```
+
+### Watching Netflix, YouTube, … while riding
+Press the **mini overlay** button (next to Settings in the header) to shrink the window to a
+compact always-on-top bar with power, target, HR, cadence and interval time, plus Start/Pause and
+intensity ±. Put it over your video; **Expand** goes back to the full app at its previous size and
+position. The ride keeps running while you switch. In the browser (without `--native`) the
+button just opens the `/mini` page.
+
+macOS doesn't show always-on-top windows over a *native full-screen* video (it gets its own
+Space): play the video in a maximized browser window instead, or use the browser's
+Picture-in-Picture. Finishing a ride is done from the full app.
 
 The first time you scan, macOS asks for Bluetooth permission for your terminal app.
 Turn it on in System Settings → Privacy & Security → Bluetooth.

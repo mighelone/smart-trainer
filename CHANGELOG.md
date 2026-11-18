@@ -11,6 +11,9 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 ## [Unreleased]
 
 ### Added
+- Mini overlay: a compact always-on-top window with the key ride metrics and controls, for riding
+  while watching a video in another window. Toggle it from the header (and **Expand** back) during a
+  ride, or start with `--mini`.
 - Upload rides to **Strava**. You use your own Strava API application: enter its Client ID and
   Secret in **Settings → Strava**, then **Connect with Strava**. The secret and the token are kept
   in the macOS Keychain. Rides upload as indoor rides, and a ride Strava already has counts as
