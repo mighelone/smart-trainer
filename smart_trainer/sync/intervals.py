@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 
+from smart_trainer.config import Settings, get_api_key
 from smart_trainer.core.workout import parse_intervals_doc, parse_zwo
 from smart_trainer.sync.base import AthleteProfile, PlannedWorkout
 
@@ -235,3 +236,16 @@ class IntervalsClient:
             )
         data = r.json()
         return str(data.get("id") or data.get("activities", [{}])[0].get("id", ""))
+
+
+def intervals_provider(settings: Settings) -> IntervalsClient | None:
+    """Create an intervals.icu client from the stored API key.
+
+    Args:
+        settings (Settings): User settings (for the athlete id).
+
+    Returns:
+        IntervalsClient | None: A client, or ``None`` if no API key is configured.
+    """
+    key = get_api_key()
+    return IntervalsClient(key, settings.intervals_athlete_id) if key else None

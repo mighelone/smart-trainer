@@ -16,9 +16,10 @@ from smart_trainer.ble.device import (
 )
 from smart_trainer.config import Settings, get_api_key, set_api_key
 from smart_trainer.core.control import Mode
-from smart_trainer.core.engine import Engine, HistoryPoint, RideState
+from smart_trainer.core.engine import Engine
 from smart_trainer.core.library import builtin_workouts
-from smart_trainer.core.recorder import Recorder, list_sessions
+from smart_trainer.core.recorder import list_sessions
+from smart_trainer.core.ride import HistoryPoint, RideState
 from smart_trainer.core.state import ConnState, Role
 from smart_trainer.core.workout import Workout, parse_zwo
 from smart_trainer.ui.theme import apply_theme
@@ -39,11 +40,13 @@ class AppState:
 
     Attributes:
         engine (Engine): The application engine.
+        settings (Settings): User settings (shared with the engine's components).
         selected (Workout | None): Workout selected for the next ride.
         fake (bool): Whether the app runs with simulated devices.
     """
 
     engine: Engine
+    settings: Settings
     selected: Workout | None = None
     fake: bool = False
 
@@ -98,7 +101,7 @@ def frame(title: str) -> None:
         e = S.engine
         with chips:
             for role in (Role.TRAINER, Role.POWER, Role.HR):
-                dev = e.device_for(role)
+                dev = e.devices.device_for(role)
                 color = DOT_COLOR[dev.state] if dev else DOT_COLOR[None]
                 tip = (
                     f"{role.value}: {dev.name} ({dev.state})"
@@ -120,7 +123,7 @@ def ride_page() -> None:
     """Ride page: live metrics, workout chart and ride controls."""
     e = S.engine
     frame("Ride")
-    ftp = e.settings.ftp
+    ftp = S.settings.ftp
 
     with ui.column().classes("page"):
         warn = ui.label("").classes("status-bar")
@@ -151,9 +154,9 @@ def ride_page() -> None:
         def ensure_chart() -> None:
             """Recreate the chart when the displayed workout changes."""
             wo = (
-                e.runner.workout
-                if e.runner
-                else (S.selected if e.state == RideState.IDLE else None)
+                e.ride.runner.workout
+                if e.ride.runner
+                else (S.selected if e.ride.state == RideState.IDLE else None)
             )
             if chart_ref["workout"] is wo:
                 return
@@ -167,25 +170,27 @@ def ride_page() -> None:
             btn_start = ui.button("Start", icon="play_arrow", on_click=lambda: start()).props(
                 "color=positive size=lg padding='8px 28px'"
             )
-            btn_pause = ui.button("Pause", icon="pause", on_click=lambda: e.toggle_pause()).props(
-                "color=primary size=lg padding='8px 24px'"
-            )
-            btn_skip = ui.button("Skip", icon="skip_next", on_click=lambda: e.skip_step()).props(
-                "color=secondary"
-            )
-            btn_lap = ui.button("Lap", icon="flag", on_click=lambda: e.lap()).props(
+            btn_pause = ui.button(
+                "Pause", icon="pause", on_click=lambda: e.ride.toggle_pause()
+            ).props("color=primary size=lg padding='8px 24px'")
+            btn_skip = ui.button(
+                "Skip", icon="skip_next", on_click=lambda: e.ride.skip_step()
+            ).props("color=secondary")
+            btn_lap = ui.button("Lap", icon="flag", on_click=lambda: e.ride.lap()).props(
                 "color=secondary"
             )
             with ui.row().classes("items-center gap-1 ml-2") as intensity_box:
                 ui.label("Intensity").classes("field-label mr-1")
-                ui.button(icon="remove", on_click=lambda: e.change_intensity(-0.05)).props(
+                ui.button(icon="remove", on_click=lambda: e.ride.change_intensity(-0.05)).props(
                     "color=secondary round dense"
                 ).tooltip("Intensity -5%")
                 intensity = ui.label("100%").classes("control-value")
-                ui.button(icon="add", on_click=lambda: e.change_intensity(0.05)).props(
+                ui.button(icon="add", on_click=lambda: e.ride.change_intensity(0.05)).props(
                     "color=secondary round dense"
                 ).tooltip("Intensity +5%")
-            erg = ui.switch("ERG", value=e.erg_enabled, on_change=lambda ev: e.set_erg(ev.value))
+            erg = ui.switch(
+                "ERG", value=e.ride.erg_enabled, on_change=lambda ev: e.ride.set_erg(ev.value)
+            )
             ui.space()
             btn_finish = ui.button("Finish", icon="stop", on_click=lambda: confirm_finish()).props(
                 "color=negative outline size=lg padding='8px 24px'"
@@ -196,7 +201,7 @@ def ride_page() -> None:
                 ui.label("Manual").classes("field-label")
                 mode = ui.toggle(
                     {"resistance": "Resistance", "slope": "Slope", "erg": "Fixed ERG"},
-                    value=e.controller.mode.value if e.runner is None else "resistance",
+                    value=e.controller.mode.value if e.ride.runner is None else "resistance",
                     on_change=lambda ev: set_manual_mode(ev.value),
                 ).classes("shrink-0")
                 slider = ui.slider(
@@ -211,8 +216,8 @@ def ride_page() -> None:
                 ui.label("Power source").classes("field-label")
                 ui.toggle(
                     {"pedals": "Pedals", "trainer": "Trainer"},
-                    value=e.settings.power_source,
-                    on_change=lambda ev: e.set_power_source(ev.value),
+                    value=S.settings.power_source,
+                    on_change=lambda ev: e.devices.set_power_source(ev.value),
                 )
 
     def set_manual_mode(m: str) -> None:
@@ -250,7 +255,7 @@ def ride_page() -> None:
     def start() -> None:
         """Start a ride with the selected workout (or a free ride)."""
         try:
-            e.start_ride(S.selected)
+            e.ride.start(S.selected)
         except RuntimeError as exc:
             ui.notify(str(exc), type="warning")
             return
@@ -265,7 +270,7 @@ def ride_page() -> None:
         """
         dialog.close()
         n = ui.notification("Saving session…", spinner=True, timeout=None)
-        fit = await e.finish(upload=upload)
+        fit = await e.ride.finish(upload=upload)
         n.dismiss()
         S.selected = None
         ui.notify(f"Saved {fit.name}" if fit else "Nothing recorded", type="positive")
@@ -287,9 +292,9 @@ def ride_page() -> None:
     # ------------------------------------------------------------ recovery
     def recovery_dialog() -> None:
         """Offer to resume, finish or discard an unfinished session."""
-        if e.state != RideState.IDLE:
+        if e.ride.state != RideState.IDLE:
             return
-        crashed = e.unfinished_sessions()
+        crashed = e.ride.recoverable_sessions()
         if not crashed:
             return
         info = crashed[0]
@@ -304,7 +309,7 @@ def ride_page() -> None:
             def resume():
                 """Resume the unfinished session."""
                 try:
-                    e.resume_session(info)
+                    e.ride.resume(info)
                 except RuntimeError as exc:
                     ui.notify(str(exc), type="warning")
                     return
@@ -314,13 +319,13 @@ def ride_page() -> None:
             async def finish():
                 """Finalize the unfinished session without resuming it."""
                 d.close()
-                fit = await e.finish_crashed(info)
+                fit = await e.store.finish_crashed(info)
                 ui.notify(f"Saved {fit.name if fit else 'session'}")
 
             def discard():
                 """Move the unfinished session to the discarded folder."""
                 d.close()
-                e.discard(info)
+                e.store.discard(info)
                 ui.notify("Session moved to sessions/discarded")
 
             with ui.row():
@@ -336,7 +341,7 @@ def ride_page() -> None:
         """Update tiles, labels, buttons and controls from the engine state."""
         ensure_chart()
         snap = e.snapshot
-        riding = e.state == RideState.RIDING
+        riding = e.ride.state == RideState.RIDING
         pedal_id = e.selector.assignment.get(Role.POWER)
         p3 = e.selector.avg_power(snap.power_source) if snap.power_source else None
         src = (
@@ -351,10 +356,10 @@ def ride_page() -> None:
             if snap.pedal_power is not None and snap.trainer_power is not None
             else ""
         )
-        zones = e.settings.power_zones
+        zones = S.settings.power_zones
         t_power.set(fmt(p3), sub)
         t_power.set_zone(*power_zone(p3, ftp, zones))
-        target = e.current_target()
+        target = e.ride.current_target()
         cmd = e.controller.last_command
         t_target.set(
             fmt(target) if target is not None else "--",
@@ -363,10 +368,10 @@ def ride_page() -> None:
             else f"{e.controller.mode.value} mode",
         )
         t_target.set_zone(*power_zone(target, ftp, zones))
-        max_hr = e.settings.max_hr
+        max_hr = S.settings.max_hr
         t_hr.set(fmt(snap.hr), f"{snap.hr / max_hr:.0%} of max" if snap.hr and max_hr else "")
-        t_hr.set_zone(*hr_zone(snap.hr, e.settings.hr_zones))
-        r = e.runner
+        t_hr.set_zone(*hr_zone(snap.hr, S.settings.hr_zones))
+        r = e.ride.runner
         st = r.current()[1] if r else None
         t_cad.set(fmt(snap.cadence), f"target {st.cadence} rpm" if st and st.cadence else "")
         t_speed.set(fmt(snap.speed_kmh, 1))
@@ -391,7 +396,7 @@ def ride_page() -> None:
             intensity.set_text(f"{r.intensity * 100:.0f}%")
             step_card.set_visibility(True)
         else:
-            t_time.set(fmt_time(e.ride_seconds if riding else 0), "free ride" if riding else "")
+            t_time.set(fmt_time(e.ride.seconds if riding else 0), "free ride" if riding else "")
             t_step.set("--")
             sel = None if riding else S.selected
             step_label.set_text(sel.name if sel else "")
@@ -401,12 +406,12 @@ def ride_page() -> None:
             step_bar.set_value(0)
             step_card.set_visibility(sel is not None)
         status = []
-        if e.manual_pause:
+        if e.ride.manual_pause:
             status.append("PAUSED")
-        elif riding and e.auto_paused:
+        elif riding and e.ride.auto_paused:
             status.append("Auto-paused: start pedalling")
         status += snap.warnings
-        if e.device_for(Role.TRAINER) and not e.trainer_connected():
+        if e.devices.device_for(Role.TRAINER) and not e.devices.trainer_connected():
             status.append("Trainer disconnected: reconnecting…")
         warn.set_text(" · ".join(status))
         warn.set_visibility(bool(status))
@@ -414,17 +419,17 @@ def ride_page() -> None:
         for b in (btn_pause, btn_finish, btn_lap):
             b.set_visibility(riding)
         btn_skip.set_visibility(riding and r is not None)
-        btn_pause.set_text("Resume" if e.manual_pause else "Pause")
+        btn_pause.set_text("Resume" if e.ride.manual_pause else "Pause")
         erg.set_visibility(r is not None)
         intensity_box.set_visibility(r is not None)
-        manual_box.set_visibility(not (r and e.erg_enabled))
+        manual_box.set_visibility(not (r and e.ride.erg_enabled))
         c = e.controller
         unit = {"resistance": "%", "slope": "% grade", "erg": " W"}[c.mode.value]
         val = {"resistance": c.resistance_pct, "slope": c.slope_pct, "erg": c.erg_target}[
             c.mode.value
         ]
         slider_label.set_text(f"{val:g}{unit}")
-        if mode.value != c.mode.value and not (r and e.erg_enabled):
+        if mode.value != c.mode.value and not (r and e.ride.erg_enabled):
             mode.value = c.mode.value
 
     tick = {"n": 0}
@@ -433,12 +438,12 @@ def ride_page() -> None:
         """Update the live power and heart-rate series of the chart."""
 
         ch = chart_ref["chart"]
-        if ch is None or not e.history:
+        if ch is None or not e.ride.history:
             return
-        hist = list(e.history)
+        hist = list(e.ride.history)
         step = max(1, len(hist) // 1500)
         # x = workout elapsed: approximate with recorded active seconds
-        offset = e.runner.elapsed - hist[-1].t if e.runner is not None else 0.0
+        offset = e.ride.runner.elapsed - hist[-1].t if e.ride.runner is not None else 0.0
 
         def x_of(p: HistoryPoint) -> float:
             """Chart x coordinate of a history point.
@@ -455,7 +460,7 @@ def ride_page() -> None:
             [round(x_of(p)), p.power] for p in hist[::step] if p.power is not None
         ]
         ch.options["series"][2]["data"] = [[round(x_of(p)), p.hr] for p in hist[::step] if p.hr]
-        if e.runner is None:
+        if e.ride.runner is None:
             end = max(600, hist[-1].t)
             ch.options["xAxis"]["max"] = end
             ch.options["xAxis"]["min"] = max(0, end - 1200)
@@ -546,32 +551,29 @@ def workouts_page() -> None:
                 ui.button("Ride this", icon="play_arrow", on_click=lambda w=wo: choose(w)).props(
                     "color=positive"
                 )
-            workout_chart(wo, e.settings.ftp, height="h-28", live=False)
+            workout_chart(wo, S.settings.ftp, height="h-28", live=False)
 
     async def load() -> None:
         """Load planned workouts from intervals.icu into the listing."""
         listing.clear()
-        key = get_api_key()
-        if not key:
-            status.set_text("Add your intervals.icu API key in Settings to load planned workouts.")
-            return
-        from smart_trainer.sync.intervals import IntervalsClient
-
-        status.set_text("Loading…")
-        client = IntervalsClient(key, e.settings.intervals_athlete_id)
-        try:
-            today = date.today()
-            planned = await client.list_workouts(
-                today - timedelta(days=2),
-                today + timedelta(days=7),
-                e.settings.ftp,
-                e.settings.power_zones,
-            )
-        except Exception as exc:
-            status.set_text(f"Could not load workouts: {exc}")
-            return
-        finally:
-            await client.aclose()
+        async with e.sync.provider() as provider:
+            if provider is None:
+                status.set_text(
+                    "Add your intervals.icu API key in Settings to load planned workouts."
+                )
+                return
+            status.set_text("Loading…")
+            try:
+                today = date.today()
+                planned = await provider.list_workouts(
+                    today - timedelta(days=2),
+                    today + timedelta(days=7),
+                    S.settings.ftp,
+                    S.settings.power_zones,
+                )
+            except Exception as exc:
+                status.set_text(f"Could not load workouts: {exc}")
+                return
         status.set_text(
             f"{len(planned)} cycling workouts planned"
             if planned
@@ -646,7 +648,7 @@ def devices_page() -> None:
                         ui.label(f"{dev.DRIVER} · used for {used_for}").classes("list-sub")
                     ui.space()
                     if isinstance(dev, Calibratable):
-                        blocker = e.calibration_blocker(did)
+                        blocker = e.calibration.blocker(did)
                         cal_btn = ui.button(
                             "Calibrate", icon="tune", on_click=lambda d=did: open_calibration(d)
                         ).props("flat")
@@ -660,8 +662,7 @@ def devices_page() -> None:
                         Args:
                             d (str): Id of the device to remove.
                         """
-                        await e.remove_device(d)
-                        e.settings.save()
+                        await e.devices.remove(d)
                         render_paired()
 
                     ui.button(icon="link_off", on_click=remove).props("flat").tooltip("Forget")
@@ -747,11 +748,11 @@ def devices_page() -> None:
 
         def start() -> None:
             """Start the calibration in the background."""
-            reason = e.calibration_blocker(device_id)
+            reason = e.calibration.blocker(device_id)
             if reason:
                 ui.notify(reason, type="warning")
                 return
-            cal_task[0] = asyncio.create_task(e.calibrate(device_id))
+            cal_task[0] = asyncio.create_task(e.calibration.run(device_id))
             render_paired()
 
         def cancel() -> None:
@@ -771,7 +772,7 @@ def devices_page() -> None:
                 start_btn.set_text("Try again" if failed else "Run again")
             cancel_btn.set_visibility(running)
             close_btn.set_visibility(not running)
-            p = e.calibration
+            p = e.calibration.progress
             if task is None or p is None:
                 return
             live.set_visibility(running)
@@ -817,17 +818,14 @@ def devices_page() -> None:
         roles = [role]
         if role == Role.POWER:
             roles.append(Role.CADENCE)
-        if role == Role.TRAINER and Role.POWER.value not in e.settings.role_assignment:
+        if role == Role.TRAINER and Role.POWER.value not in S.settings.role_assignment:
             roles += [Role.POWER, Role.CADENCE]
         if role == Role.TRAINER:
             roles.append(Role.SPEED)
         if dev.id in e.devices:
-            for ro in roles:
-                e.settings.role_assignment[ro.value] = dev.id
-            e._apply_assignment()
-            e.settings.save()
+            e.devices.assign(dev.id, roles)
         else:
-            e.pair(dev, roles)
+            e.devices.pair(dev, roles)
         ui.notify(f"{r.name} assigned to {role.value}")
         render_paired()
 
@@ -843,14 +841,14 @@ def history_page() -> None:
     frame("History")
     with ui.column().classes("page page-narrow"):
         ui.label("Sessions").classes("section-title")
-        ui.label(f"Stored in {e.sessions}").classes("hint")
+        ui.label(f"Stored in {e.store.directory}").classes("hint")
         listing = ui.column().classes("w-full gap-2")
 
     def render() -> None:
         """Redraw the list of recorded sessions."""
         listing.clear()
         with listing:
-            for s in list_sessions(e.sessions):
+            for s in list_sessions(e.store.directory):
                 with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
                     icon, color = {
                         "uploaded": ("cloud_done", "positive"),
@@ -869,18 +867,13 @@ def history_page() -> None:
                     fit = s.path.with_suffix(".fit")
                     if s.status == "finished" and fit.exists():
 
-                        async def up(s=s, fit=fit):
+                        async def up(s=s):
                             """Upload a finished session to intervals.icu.
 
                             Args:
                                 s (SessionInfo): The session to upload.
-                                fit (Path): Path of the session's FIT file.
                             """
-                            rec = Recorder.open(s.path)
-                            try:
-                                ok = await e.upload(rec, fit, s)
-                            finally:
-                                rec.close()
+                            ok = await e.store.upload_session(s)
                             ui.notify(
                                 "Uploaded" if ok else e.messages[-1],
                                 type="positive" if ok else "negative",
@@ -933,7 +926,7 @@ def profile_summary(st: Settings) -> str:
 def settings_page() -> None:
     """Settings page: rider profile, intervals.icu and power matching."""
     e = S.engine
-    st = e.settings
+    st = S.settings
     frame("Settings")
     with (
         ui.column().classes("page page-narrow [&_.q-field]:w-full"),
@@ -965,7 +958,7 @@ def settings_page() -> None:
             """Fetch the profile from intervals.icu and show the result."""
             sync_btn.props("loading")
             try:
-                changed = await e.sync_profile()
+                changed = await e.sync.sync_profile()
             finally:
                 sync_btn.props(remove="loading")
             if changed is None:

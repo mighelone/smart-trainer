@@ -8,6 +8,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 (`[Unreleased]` is skipped). To release, rename `[Unreleased]` to the new version and date, then
 push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
+## [Unreleased]
+
+### Changed
+- Split the app core (`Engine`) into focused components: `DeviceHub` (devices and roles),
+  `Ride` (the ride in progress), `CalibrationService`, `SessionStore` (session files, FIT
+  export, recovery) and `SyncService` (uploads and profile sync). `Engine` now only wires them
+  together and runs the control loop.
+- Sync goes through the `SyncProvider` interface; the intervals.icu client is injected at
+  startup, so another platform can be added without touching the core.
+
 ## [0.2.0] - 2026-11-17
 
 ### Added

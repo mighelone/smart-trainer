@@ -128,3 +128,6 @@ class SyncProvider(Protocol):
         Returns:
             str: Id of the created activity.
         """
+
+    async def aclose(self) -> None:
+        """Release the provider's resources (e.g. its HTTP connection)."""

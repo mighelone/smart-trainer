@@ -1,10 +1,9 @@
 import httpx
 import pytest
 
-import smart_trainer.core.engine as engine_mod
-import smart_trainer.sync.intervals as intervals_mod
 from smart_trainer.config import DEFAULT_POWER_ZONES, Settings
-from smart_trainer.core.engine import Engine, RideState
+from smart_trainer.core.engine import Engine
+from smart_trainer.core.ride import RideState
 from smart_trainer.core.workout import parse_intervals_doc, zone_mid
 from smart_trainer.sync.base import AthleteProfile
 from smart_trainer.sync.intervals import IntervalsClient, parse_profile
@@ -77,49 +76,51 @@ def _handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404)
 
 
+def _client(handler=_handler) -> IntervalsClient:
+    return IntervalsClient("secret", "0", transport=httpx.MockTransport(handler))
+
+
+def _make_engine(tmp_path, provider, settings: Settings | None = None) -> Engine:
+    settings = settings or Settings(ftp=200, auto_upload=False)
+    return Engine.from_settings(settings, sessions=tmp_path, sync_provider=provider)
+
+
 @pytest.fixture
-def engine(tmp_path, monkeypatch):
+def settings(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "path", classmethod(lambda cls: tmp_path / "config.json"))
-    monkeypatch.setattr(engine_mod, "get_api_key", lambda: "secret")
-    real = IntervalsClient
-    monkeypatch.setattr(
-        intervals_mod,
-        "IntervalsClient",
-        lambda key, athlete: real(key, athlete, transport=httpx.MockTransport(_handler)),
-    )
-    return Engine(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
+    return Settings(ftp=200, auto_upload=False)
 
 
-async def test_engine_sync_profile_updates_and_saves(engine, tmp_path):
-    changed = await engine.sync_profile()
+@pytest.fixture
+def engine(tmp_path, settings):
+    return _make_engine(tmp_path, _client, settings)
+
+
+async def test_engine_sync_profile_updates_and_saves(engine, settings):
+    changed = await engine.sync.sync_profile()
     assert "FTP" in changed and "weight" in changed
-    assert engine.settings.ftp == 265
-    assert engine.settings.profile_synced_at is not None
+    assert settings.ftp == 265
+    assert settings.profile_synced_at is not None
     assert Settings.load().ftp == 265  # persisted
-    assert await engine.sync_profile() == []  # nothing new
+    assert await engine.sync.sync_profile() == []  # nothing new
 
 
-async def test_engine_sync_profile_skipped(engine, monkeypatch):
-    engine.state = RideState.RIDING
-    assert await engine.sync_profile() is None
-    assert engine.settings.ftp == 200 and "ride" in engine.messages[-1]
-    engine.state = RideState.IDLE
-    monkeypatch.setattr(engine_mod, "get_api_key", lambda: None)
-    assert await engine.sync_profile() is None
-    engine.settings._readonly = True
-    assert await engine.sync_profile() is None
-    assert engine.settings.ftp == 200
+async def test_engine_sync_profile_skipped(engine, settings, tmp_path):
+    engine.ride.state = RideState.RIDING
+    assert await engine.sync.sync_profile() is None
+    assert settings.ftp == 200 and "ride" in engine.messages[-1]
+    engine.ride.state = RideState.IDLE
+    settings._readonly = True
+    assert await engine.sync.sync_profile() is None
+    assert settings.ftp == 200
+    no_account = _make_engine(tmp_path, lambda: None)
+    assert await no_account.sync.sync_profile() is None
+    assert "API key" in no_account.messages[-1]
 
 
-async def test_engine_sync_profile_error(engine, monkeypatch):
-    real = IntervalsClient
-    monkeypatch.setattr(
-        intervals_mod,
-        "IntervalsClient",
-        lambda key, athlete: real(
-            key, athlete, transport=httpx.MockTransport(lambda r: httpx.Response(401))
-        ),
-    )
-    assert await engine.sync_profile() is None
+async def test_engine_sync_profile_error(tmp_path):
+    settings = Settings(ftp=200, auto_upload=False)
+    engine = _make_engine(tmp_path, lambda: _client(lambda r: httpx.Response(401)), settings)
+    assert await engine.sync.sync_profile() is None
     assert "rejected" in engine.messages[-1]
-    assert engine.settings.profile_synced_at is None
+    assert settings.profile_synced_at is None
