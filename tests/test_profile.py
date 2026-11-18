@@ -1,7 +1,6 @@
 import httpx
 import pytest
 
-import smart_trainer.core.engine as engine_mod
 import smart_trainer.sync.intervals as intervals_mod
 from smart_trainer.config import DEFAULT_POWER_ZONES, Settings
 from smart_trainer.core.engine import Engine, RideState
@@ -80,7 +79,7 @@ def _handler(request: httpx.Request) -> httpx.Response:
 @pytest.fixture
 def engine(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "path", classmethod(lambda cls: tmp_path / "config.json"))
-    monkeypatch.setattr(engine_mod, "get_api_key", lambda: "secret")
+    monkeypatch.setattr(intervals_mod, "get_api_key", lambda: "secret")
     real = IntervalsClient
     monkeypatch.setattr(
         intervals_mod,
@@ -104,7 +103,7 @@ async def test_engine_sync_profile_skipped(engine, monkeypatch):
     assert await engine.sync_profile() is None
     assert engine.settings.ftp == 200 and "ride" in engine.messages[-1]
     engine.state = RideState.IDLE
-    monkeypatch.setattr(engine_mod, "get_api_key", lambda: None)
+    monkeypatch.setattr(intervals_mod, "get_api_key", lambda: None)
     assert await engine.sync_profile() is None
     engine.settings._readonly = True
     assert await engine.sync_profile() is None

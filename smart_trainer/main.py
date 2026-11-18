@@ -11,10 +11,15 @@ from nicegui import app, native, ui
 
 from smart_trainer.ble import fake
 from smart_trainer.ble.scanner import make_device
-from smart_trainer.config import APP_DIR, Settings, get_api_key
+from smart_trainer.config import APP_DIR, Settings
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
-from smart_trainer.ui import pages  # noqa: F401  (registers the pages)
+from smart_trainer.sync import registry
+from smart_trainer.sync.base import Capability
+from smart_trainer.ui import (
+    connections,
+    pages,  # noqa: F401  (registers the pages)
+)
 from smart_trainer.ui.pages import S
 
 log = logging.getLogger("smart_trainer")
@@ -51,7 +56,7 @@ def _startup(use_fake: bool) -> None:
                 log.warning("unknown driver %s for %s", pd.driver, pd.name)
     engine.start()
     log.info("engine started (data dir: %s)", APP_DIR)
-    if not use_fake and settings.sync_profile and get_api_key():
+    if not use_fake and settings.sync_profile and registry.connected(settings, Capability.PROFILE):
         # In the background: a slow or failing network must not block launch
         _background.add(task := asyncio.create_task(engine.sync_profile()))
         task.add_done_callback(_background.discard)
@@ -89,6 +94,7 @@ def run() -> None:
         # A native window doesn't need a stable URL, so avoid clashing with other apps;
         # with --lan the iPad needs a predictable address.
         port = 8080 if args.lan or not args.native else native.find_open_port()
+    connections.server_port = port  # the Strava OAuth redirect comes back to this port
     ui.run(
         title="Smart Trainer",
         dark=True,

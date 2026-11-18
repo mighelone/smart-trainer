@@ -8,6 +8,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 (`[Unreleased]` is skipped). To release, rename `[Unreleased]` to the new version and date, then
 push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
+## [Unreleased]
+
+### Added
+- Upload rides to **Strava**. You use your own Strava API application: enter its Client ID and
+  Secret in **Settings → Strava**, then **Connect with Strava**. The secret and the token are kept
+  in the macOS Keychain. Rides upload as indoor rides, and a ride Strava already has counts as
+  uploaded.
+- Modular connections: each service (intervals.icu, Strava, …) declares what it can do (upload
+  rides, provide planned workouts, sync the profile). Adding one doesn't touch the engine or the pages.
+
+### Changed
+- Rides are uploaded to every connected service. Each service in **Settings → Connections** can be
+  turned off or left out of the automatic upload.
+- **History** shows the upload status per service, and **Upload** retries only where it's missing
+  or failed.
+- Settings are migrated automatically. Existing sessions keep their intervals.icu upload status.
+
 ## [0.2.0] - 2026-11-17
 
 ### Added

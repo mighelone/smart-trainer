@@ -24,13 +24,15 @@ from smart_trainer.ble.device import (
     ControllableTrainer,
     Device,
 )
-from smart_trainer.config import PairedDevice, Settings, get_api_key, sessions_dir
+from smart_trainer.config import PairedDevice, Settings, sessions_dir
 from smart_trainer.core.control import Mode, TrainerController
 from smart_trainer.core.recorder import Recorder, SessionInfo, find_unfinished
 from smart_trainer.core.sources import SourceSelector
 from smart_trainer.core.state import ConnState, Role, Snapshot
 from smart_trainer.core.workout import Workout, WorkoutRunner
 from smart_trainer.export.fit import export_fit
+from smart_trainer.sync import registry
+from smart_trainer.sync.base import Capability, Connection, RideUpload
 
 log = logging.getLogger(__name__)
 
@@ -501,8 +503,8 @@ class Engine:
         """Stop recording, export FIT, and optionally upload.
 
         Args:
-            upload (bool | None): Whether to upload; defaults to the
-                ``auto_upload`` setting.
+            upload (bool | None): ``True`` uploads to every connected upload target,
+                ``False`` never uploads, ``None`` follows the automatic upload settings.
 
         Returns:
             Path | None: The FIT file path, or ``None`` if nothing was recorded.
@@ -519,13 +521,25 @@ class Engine:
         self.last_fit = fit
         return fit
 
+    def auto_upload_targets(self) -> list[str]:
+        """Connections a finished ride is uploaded to automatically.
+
+        Returns:
+            list[str]: Connection ids (empty if automatic upload is off).
+        """
+        if not self.settings.auto_upload:
+            return []
+        return [
+            c.id for c in registry.connected(self.settings, Capability.UPLOAD) if c.conf.auto_upload
+        ]
+
     async def finalize(self, rec: Recorder, upload: bool | None = None) -> Path | None:
         """Export a session to FIT, mark it finished and optionally upload it.
 
         Args:
             rec (Recorder): The session recorder.
-            upload (bool | None): Whether to upload; defaults to the
-                ``auto_upload`` setting.
+            upload (bool | None): ``True`` uploads to every connected upload target,
+                ``False`` never uploads, ``None`` follows the automatic upload settings.
 
         Returns:
             Path | None: The FIT file path, or ``None`` if the session has no samples.
@@ -535,48 +549,82 @@ class Engine:
         if info.n_samples:
             fit = export_fit(rec, rec.path.with_suffix(".fit"))
         rec.set_status("finished")
-        if fit and (self.settings.auto_upload if upload is None else upload):
+        if fit and upload is None:
+            if targets := self.auto_upload_targets():
+                await self.upload(rec, fit, info, targets)
+        elif fit and upload:
             await self.upload(rec, fit, info)
         return fit
 
-    async def upload(self, rec: Recorder, fit: Path, info: SessionInfo | None = None) -> bool:
-        """Upload a FIT file to intervals.icu and record the outcome in the session.
+    async def upload(
+        self,
+        rec: Recorder,
+        fit: Path,
+        info: SessionInfo | None = None,
+        targets: list[str] | None = None,
+    ) -> dict[str, bool]:
+        """Upload a FIT file to the connections and record each outcome in the session.
+
+        Connections the session was already uploaded to are skipped. Uploads run
+        concurrently; one failing doesn't affect the others.
 
         Args:
             rec (Recorder): The session recorder.
             fit (Path): Path of the FIT file to upload.
             info (SessionInfo | None): Session info; read from ``rec`` if omitted.
+            targets (list[str] | None): Connection ids to upload to; defaults to every
+                enabled, configured upload connection.
 
         Returns:
-            bool: ``True`` if the upload succeeded.
+            dict[str, bool]: Whether the upload succeeded, by connection id.
         """
         info = info or rec.info()
         if self.settings._readonly:
             self.messages.append("Demo mode: uploads are disabled")
-            return False
-        key = get_api_key()
-        if not key:
-            self.messages.append("No intervals.icu API key: saved locally only")
-            return False
-        from smart_trainer.sync.intervals import IntervalsClient
-
-        client = IntervalsClient(key, self.settings.intervals_athlete_id)
-        try:
-            aid = await client.upload_activity(
-                fit, info.name, paired_event_id=info.workout.source_id if info.workout else None
+            return {}
+        conns = [
+            c
+            for c in registry.connected(self.settings, Capability.UPLOAD)
+            if (targets is None or c.id in targets) and not info.uploaded(c.id)
+        ]
+        if not conns:
+            self.messages.append("No connection to upload to: saved locally only")
+            return {}
+        ride = RideUpload(
+            fit,
+            info.name,
+            started_at=info.started_at,
+            workout_source_id=info.workout.source_id if info.workout else None,
+        )
+        outcomes = await asyncio.gather(*(self._upload_one(c, ride) for c in conns))
+        result: dict[str, bool] = {}
+        for c, (aid, err) in zip(conns, outcomes, strict=True):
+            rec.set_upload(c.id, aid, err)
+            result[c.id] = err is None
+            self.messages.append(
+                f"Uploaded to {c.name} ({aid})" if err is None else f"{c.name} upload failed: {err}"
             )
-            rec.set_status("uploaded", upload_id=aid, upload_error=None)
-            self.messages.append(f"Uploaded to intervals.icu ({aid})")
-            return True
+        return result
+
+    @staticmethod
+    async def _upload_one(conn: Connection, ride: RideUpload) -> tuple[str | None, str | None]:
+        """Upload a ride to one connection, capturing the error.
+
+        Args:
+            conn (Connection): The connection.
+            ride (RideUpload): The ride.
+
+        Returns:
+            tuple[str | None, str | None]: The activity id, or the error message.
+        """
+        try:
+            return await conn.upload_activity(ride), None
         except Exception as exc:
-            rec.set_status("finished", upload_error=str(exc))
-            self.messages.append(f"Upload failed: {exc}")
-            return False
-        finally:
-            await client.aclose()
+            log.warning("upload to %s failed: %s", conn.name, exc)
+            return None, str(exc) or type(exc).__name__
 
     async def sync_profile(self) -> list[str] | None:
-        """Update FTP, weight and zones from intervals.icu and save the settings.
+        """Update FTP, weight and zones from the profile connection and save the settings.
 
         Skipped during a ride, so the ride keeps the FTP it started with.
 
@@ -590,24 +638,18 @@ class Engine:
         if self.state != RideState.IDLE:
             self.messages.append("Profile sync skipped during a ride")
             return None
-        key = get_api_key()
-        if not key:
-            self.messages.append("No intervals.icu API key: profile not synced")
+        conns = registry.connected(self.settings, Capability.PROFILE)
+        if not conns:
+            self.messages.append("No profile connection configured: profile not synced")
             return None
-        from smart_trainer.sync.intervals import IntervalsClient
-
-        log.info(
-            "syncing profile from intervals.icu (athlete %s)", self.settings.intervals_athlete_id
-        )
-        client = IntervalsClient(key, self.settings.intervals_athlete_id)
+        conn = conns[0]
+        log.info("syncing profile from %s", conn.name)
         try:
-            profile = await client.profile()
+            profile = await conn.profile()
         except Exception as exc:
             log.warning("profile sync failed: %s", exc)
             self.messages.append(f"Profile sync failed: {exc}")
             return None
-        finally:
-            await client.aclose()
         if self.state != RideState.IDLE:  # a ride started while we were waiting
             self.messages.append("Profile sync skipped during a ride")
             return None
@@ -616,8 +658,9 @@ class Engine:
         self.settings.save()
         st = self.settings
         log.info(
-            "profile synced from intervals.icu: FTP %s W, weight %s kg, power zones %s, "
+            "profile synced from %s: FTP %s W, weight %s kg, power zones %s, "
             "HR zones %s, LTHR %s, max HR %s (changed: %s)",
+            conn.name,
             st.ftp,
             st.weight_kg,
             st.power_zones,
@@ -633,8 +676,8 @@ class Engine:
 
         Args:
             info (SessionInfo): The unfinished session.
-            upload (bool | None): Whether to upload; defaults to the
-                ``auto_upload`` setting.
+            upload (bool | None): ``True`` uploads to every connected upload target,
+                ``False`` never uploads, ``None`` follows the automatic upload settings.
 
         Returns:
             Path | None: The FIT file path, or ``None`` if the session has no samples.
