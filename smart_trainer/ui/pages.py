@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
+from typing import Protocol, cast
 
 from nicegui import app, ui
 
@@ -123,9 +124,32 @@ def frame(title: str) -> None:
 
 
 # ============================================================ WINDOW MODES
+class NativeWindow(Protocol):
+    """The part of NiceGUI's native ``WindowProxy`` used here.
+
+    NiceGUI falls back to an empty ``WindowProxy`` class when pywebview is missing, which hides
+    these methods from type checkers.
+    """
+
+    async def get_size(self) -> tuple[int, int]: ...
+    async def get_position(self) -> tuple[int, int]: ...
+    def set_always_on_top(self, on_top: bool) -> None: ...
+    def resize(self, width: int, height: int) -> None: ...
+    def move(self, x: int, y: int) -> None: ...
+
+
+def native_window() -> NativeWindow | None:
+    """The native desktop window, or ``None`` when running in a browser.
+
+    Returns:
+        NativeWindow | None: The window proxy.
+    """
+    return cast("NativeWindow | None", app.native.main_window)
+
+
 async def enter_mini() -> None:
     """Switch to the mini overlay: small, always-on-top window (native) and the /mini page."""
-    w = app.native.main_window
+    w = native_window()
     if w is not None:
         S.full_geometry = (await w.get_size(), await w.get_position())
         w.set_always_on_top(True)
@@ -135,7 +159,7 @@ async def enter_mini() -> None:
 
 def restore_full_window() -> None:
     """Restore the normal window: not on top, previous size and position (native only)."""
-    w = app.native.main_window
+    w = native_window()
     if w is None:
         return
     w.set_always_on_top(False)
