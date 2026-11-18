@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from dataclasses import dataclass, field
+from typing import ClassVar
 
-from smart_trainer.core.state import Reading, Role, Snapshot
+from smart_trainer.core.state import Assignment, Reading, Role, Snapshot
 
 STALE_S = 3.0
 
 
+@dataclass(slots=True)
 class _Latest:
     """Latest value of a metric and the time it was received.
 
@@ -18,12 +21,8 @@ class _Latest:
         ts (float): Monotonic timestamp of ``value``.
     """
 
-    __slots__ = ("value", "ts")
-
-    def __init__(self) -> None:
-        """Initialize with no value."""
-        self.value: float | None = None
-        self.ts = 0.0
+    value: float | None = None
+    ts: float = 0.0
 
     def set(self, v: float | None, ts: float) -> None:
         """Store a new value, ignoring ``None``.
@@ -47,31 +46,27 @@ class _Latest:
         return self.value if self.value is not None and now - self.ts <= STALE_S else None
 
 
+@dataclass(eq=False)
 class SourceSelector:
-    """Keeps the latest value per (device, metric) and resolves roles to devices.
+    """Keeps the latest value per (device, metric) and builds snapshots from them.
 
-    ``assignment`` maps a Role to the preferred device id. Power falls back to the
-    trainer when the preferred power device has gone silent.
+    It only stores readings; which device plays which role is passed to
+    :meth:`create_snapshot` as an :class:`Assignment`. Power falls back to the trainer
+    when the preferred power device has gone silent. ``eq=False`` keeps identity
+    semantics: the selector is stateful, not a value.
 
     Attributes:
         METRICS (tuple[str, ...]): Reading fields tracked per device.
-        assignment (dict[Role, str]): Preferred device id for each role.
-        trainer_id (str | None): Id of the trainer device, if any.
+        AVG_WINDOW_S (float): Window of the power averages, in seconds.
     """
 
-    METRICS = ("power", "cadence", "speed_kmh", "hr", "balance_left")
+    METRICS: ClassVar[tuple[str, ...]] = ("power", "cadence", "speed_kmh", "hr", "balance_left")
+    AVG_WINDOW_S: ClassVar[float] = 3.0
 
-    def __init__(self, assignment: dict[Role, str] | None = None, trainer_id: str | None = None):
-        """Initialize the selector.
-
-        Args:
-            assignment (dict[Role, str] | None): Preferred device id for each role.
-            trainer_id (str | None): Id of the trainer device, if any.
-        """
-        self.assignment: dict[Role, str] = dict(assignment or {})
-        self.trainer_id = trainer_id
-        self._latest: dict[tuple[str, str], _Latest] = {}
-        self._power_hist: dict[str, deque[tuple[float, float]]] = {}
+    _latest: dict[tuple[str, str], _Latest] = field(default_factory=dict, init=False, repr=False)
+    _power_hist: dict[str, deque[tuple[float, float]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def on_reading(self, r: Reading) -> None:
         """Record the metrics contained in a reading.
@@ -102,21 +97,19 @@ class SourceSelector:
         lat = self._latest.get((device_id, metric))
         return lat.get(now if now is not None else time.monotonic()) if lat else None
 
-    def avg_power(self, device_id: str | None, window_s: float = 3.0, now: float | None = None):
-        """Average power of a device over a recent time window.
+    def _avg_power(self, device_id: str | None, now: float) -> float | None:
+        """Average power of a device over the last :attr:`AVG_WINDOW_S` seconds.
 
         Args:
             device_id (str | None): Device id; ``None`` always yields ``None``.
-            window_s (float): Averaging window in seconds.
-            now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
+            now (float): Current monotonic time.
 
         Returns:
             float | None: Average power in watts, or ``None`` if no samples in window.
         """
         if device_id is None or device_id not in self._power_hist:
             return None
-        now = now if now is not None else time.monotonic()
-        vals = [p for ts, p in self._power_hist[device_id] if now - ts <= window_s]
+        vals = [p for ts, p in self._power_hist[device_id] if now - ts <= self.AVG_WINDOW_S]
         return sum(vals) / len(vals) if vals else None
 
     def _first(self, metric: str, candidates: list[str | None], now: float):
@@ -137,28 +130,38 @@ class SourceSelector:
                 return v, dev
         return None, None
 
-    def snapshot(self, now: float | None = None) -> Snapshot:
+    def create_snapshot(self, assignment: Assignment, now: float | None = None) -> Snapshot:
         """Build the effective metrics snapshot for the current second.
 
         Args:
+            assignment (Assignment): Which device plays which role.
             now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
 
         Returns:
-            Snapshot: The resolved metrics, including fallback warnings.
+            Snapshot: The resolved metrics, including power averages and fallback warnings.
         """
         now = now if now is not None else time.monotonic()
-        a = self.assignment
-        snap = Snapshot()
-        pref_power = a.get(Role.POWER)
-        trainer = self.trainer_id
-        snap.trainer_power = self.value(trainer, "power", now)
-        snap.pedal_power = self.value(pref_power, "power", now) if pref_power != trainer else None
-        snap.power, snap.power_source = self._first("power", [pref_power, trainer], now)
-        if pref_power and pref_power != trainer and snap.power_source == trainer:
-            snap.warnings.append("Pedals not sending power: using trainer power")
-        snap.cadence, _ = self._first("cadence", [a.get(Role.CADENCE), pref_power, trainer], now)
-        snap.speed_kmh, _ = self._first("speed_kmh", [a.get(Role.SPEED), trainer], now)
-        hr, _ = self._first("hr", [a.get(Role.HR), trainer], now)
-        snap.hr = int(hr) if hr is not None else None
-        snap.balance_left = self.value(pref_power, "balance_left", now)
-        return snap
+        pedals = assignment.power_id if assignment.has_pedals else None
+        trainer = assignment.trainer_id
+        power_candidates = [assignment.power_id, trainer]
+        power, power_source = self._first("power", power_candidates, now)
+        cadence, _ = self._first("cadence", [assignment.get(Role.CADENCE), *power_candidates], now)
+        speed_kmh, _ = self._first("speed_kmh", [assignment.get(Role.SPEED), trainer], now)
+        hr, _ = self._first("hr", [assignment.get(Role.HR), trainer], now)
+        warnings = []
+        if pedals and power_source == trainer:
+            warnings.append("Pedals not sending power: using trainer power")
+        return Snapshot(
+            power=power,
+            cadence=cadence,
+            speed_kmh=speed_kmh,
+            hr=int(hr) if hr is not None else None,
+            balance_left=self.value(assignment.power_id, "balance_left", now),
+            trainer_power=self.value(trainer, "power", now),
+            pedal_power=self.value(pedals, "power", now),
+            power_source=power_source,
+            power_avg=self._avg_power(power_source, now),
+            pedal_avg=self._avg_power(pedals, now),
+            trainer_avg=self._avg_power(trainer, now),
+            warnings=warnings,
+        )

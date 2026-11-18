@@ -6,9 +6,9 @@ import logging
 import time
 from enum import StrEnum
 
-from smart_trainer.ble.device import ControllableTrainer
+from smart_trainer.ble.device import ControllableTrainer, Device
 from smart_trainer.config import PowerMatch
-from smart_trainer.core.state import Snapshot
+from smart_trainer.core.state import Assignment, Snapshot
 
 log = logging.getLogger(__name__)
 
@@ -55,21 +55,13 @@ class PowerMatcher:
         self.integral = 0.0
         self._last_target = None
 
-    def command(
-        self,
-        target: float,
-        snap: Snapshot,
-        pedal_avg: float | None,
-        trainer_avg: float | None,
-        now: float | None = None,
-    ) -> float:
+    def command(self, target: float, snapshot: Snapshot, now: float | None = None) -> float:
         """Compute the ERG command to send to the trainer.
 
         Args:
             target (float): Desired pedal power in watts.
-            snap (Snapshot): Current effective metrics.
-            pedal_avg (float | None): Recent average pedal power in watts.
-            trainer_avg (float | None): Recent average trainer power in watts.
+            snapshot (Snapshot): Current metrics, including the pedal and trainer
+                power averages.
             now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
 
         Returns:
@@ -81,7 +73,8 @@ class PowerMatcher:
             self._last_target = target
             self._target_changed_at = now
         settled = now - self._target_changed_at >= c.settle_s
-        riding = (snap.cadence or 0) >= c.min_cadence
+        riding = (snapshot.cadence or 0) >= c.min_cadence
+        pedal_avg, trainer_avg = snapshot.pedal_avg, snapshot.trainer_avg
         if settled and riding and pedal_avg and pedal_avg > 30:
             if trainer_avg and trainer_avg > 30:
                 r = trainer_avg / pedal_avg
@@ -127,6 +120,17 @@ class TrainerController:
         self._last_sent_at = 0.0
         self.trainer: ControllableTrainer | None = None
 
+    def configure(self, assignment: Assignment, trainer: Device | None) -> None:
+        """Adopt a new role assignment (e.g. after pairing or a power-source change).
+
+        Args:
+            assignment (Assignment): The resolved role assignment.
+            trainer (Device | None): The trainer device, if one is assigned.
+        """
+        self.trainer = trainer if isinstance(trainer, ControllableTrainer) else None
+        self.use_pedals = assignment.has_pedals
+        self.force_resend()
+
     def set_mode(self, mode: Mode) -> None:
         """Change the control mode, resetting the power matcher on change.
 
@@ -141,19 +145,11 @@ class TrainerController:
         """Force the next :meth:`apply` call to resend the command."""
         self.last_command = None
 
-    def compute(
-        self,
-        snap: Snapshot,
-        pedal_avg: float | None,
-        trainer_avg: float | None,
-        now: float | None = None,
-    ) -> tuple[Mode, float]:
+    def compute(self, snapshot: Snapshot, now: float | None = None) -> tuple[Mode, float]:
         """Compute the command for the current mode.
 
         Args:
-            snap (Snapshot): Current effective metrics.
-            pedal_avg (float | None): Recent average pedal power in watts.
-            trainer_avg (float | None): Recent average trainer power in watts.
+            snapshot (Snapshot): Current effective metrics.
             now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
 
         Returns:
@@ -161,27 +157,20 @@ class TrainerController:
         """
         if self.mode == Mode.ERG:
             target = self.erg_target
-            if self.use_pedals and snap.pedal_power is not None:
-                return Mode.ERG, self.matcher.command(target, snap, pedal_avg, trainer_avg, now)
+            if self.use_pedals and snapshot.pedal_power is not None:
+                return Mode.ERG, self.matcher.command(target, snapshot, now)
             return Mode.ERG, target
         if self.mode == Mode.RESISTANCE:
             return Mode.RESISTANCE, self.resistance_pct
         return Mode.SLOPE, self.slope_pct
 
     async def apply(
-        self,
-        snap: Snapshot,
-        pedal_avg: float | None,
-        trainer_avg: float | None,
-        connected: bool,
-        now: float | None = None,
+        self, snapshot: Snapshot, connected: bool, now: float | None = None
     ) -> tuple[Mode, float] | None:
         """Send the current command to the trainer if it changed or is due a resend.
 
         Args:
-            snap (Snapshot): Current effective metrics.
-            pedal_avg (float | None): Recent average pedal power in watts.
-            trainer_avg (float | None): Recent average trainer power in watts.
+            snapshot (Snapshot): Current effective metrics.
             connected (bool): Whether the trainer is currently connected.
             now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
 
@@ -193,7 +182,7 @@ class TrainerController:
             self.last_command = None  # resend everything after reconnect
             return None
         now = now if now is not None else time.monotonic()
-        mode, value = self.compute(snap, pedal_avg, trainer_avg, now)
+        mode, value = self.compute(snapshot, now)
         rounded = round(value) if mode == Mode.ERG else round(value, 1)
         changed = (
             self.last_command is None

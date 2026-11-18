@@ -8,7 +8,8 @@ from nicegui.testing import User
 
 from smart_trainer.ble import fake
 from smart_trainer.config import Settings
-from smart_trainer.core.engine import Engine, RideState
+from smart_trainer.core.engine import Engine
+from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import Role
 
 pytestmark = pytest.mark.nicegui_main_file("tests/ui_main.py")
@@ -45,20 +46,18 @@ def pages(user: User):
 
 
 @pytest.fixture
-async def engine(pages, tmp_path, monkeypatch):
-    """Engine with simulated devices, installed in the pages module."""
-    monkeypatch.delenv("INTERVALS_API_KEY", raising=False)
-    monkeypatch.setattr(pages, "get_api_key", lambda: None)
+async def engine(pages, tmp_path):
+    """Engine with simulated devices and no connections, installed in the pages module."""
     settings = Settings(ftp=200, auto_upload=False)
     settings._readonly = True
-    e = Engine(settings, sessions=tmp_path)
-    e.add_device(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
-    e.add_device(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
-    e.add_device(fake.FakeHeartRate(), [Role.HR])
-    pages.S.engine, pages.S.fake = e, True
-    await asyncio.sleep(0.4)  # let the fake devices connect
-    yield e
-    await e.shutdown()
+    e = Engine.from_settings(settings, sessions=tmp_path)
+    e.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
+    e.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
+    e.devices.add(fake.FakeHeartRate(), [Role.HR])
+    pages.S.engine, pages.S.settings, pages.S.fake = e, settings, True
+    async with e:
+        await asyncio.sleep(0.4)  # let the fake devices connect
+        yield e
 
 
 @pytest.mark.parametrize(
@@ -88,10 +87,10 @@ async def test_mini_toggle_in_browser(user: User, engine):
 async def test_mini_start_and_pause(user: User, engine):
     await user.open("/mini")
     user.find(marker="mini-start").click()
-    assert engine.state == RideState.RIDING
+    assert engine.ride.state == RideState.RIDING
     await user.should_see("Free ride ·", retries=20)
     user.find(marker="mini-pause").click()
-    assert engine.manual_pause
+    assert engine.ride.manual_pause
     await user.should_see("PAUSED", retries=20)
 
 
