@@ -9,10 +9,14 @@ def simulate(bias: float, target: float, seconds: int = 240, matcher=None):
     true_power, cmd = target, target
     for t in range(seconds):
         true_power += (cmd / bias - true_power) * 0.5
-        snap = Snapshot(power=true_power, pedal_power=true_power, cadence=90)
-        cmd = m.command(
-            target, snap, pedal_avg=true_power, trainer_avg=true_power * bias, now=float(t)
+        snap = Snapshot(
+            power=true_power,
+            pedal_power=true_power,
+            cadence=90,
+            pedal_avg=true_power,
+            trainer_avg=true_power * bias,
         )
+        cmd = m.command(target, snap, now=float(t))
     return true_power, m
 
 
@@ -33,12 +37,13 @@ def test_offset_is_clamped():
     cfg = PowerMatch(max_offset_w=10)
     p, m = simulate(1.25, 200, matcher=PowerMatcher(cfg))
     assert p < 200  # can't fully compensate a 25 % error with a 10 W clamp
-    cmd = m.command(200, Snapshot(cadence=90, pedal_power=150), 150, 190, now=1000.0)
+    snap = Snapshot(cadence=90, pedal_power=150, pedal_avg=150, trainer_avg=190)
+    cmd = m.command(200, snap, now=1000.0)
     assert cmd <= 210
 
 
 def test_no_learning_when_not_pedaling():
     m = PowerMatcher(PowerMatch())
     for t in range(60):
-        m.command(200, Snapshot(cadence=0, pedal_power=0), 0, 0, now=float(t))
+        m.command(200, Snapshot(cadence=0, pedal_power=0, pedal_avg=0, trainer_avg=0), now=float(t))
     assert m.ratio == 1.0 and m.integral == 0.0
