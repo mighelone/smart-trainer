@@ -229,7 +229,7 @@ class Ride:
                 now_wall,
             )
         x = self.runner.elapsed if self.runner else self.seconds
-        self.history.add(HistoryPoint(x, snap.power, snap.hr, snap.cadence, target))
+        self.history.add(HistoryPoint(x, snap.power_mean, snap.hr, snap.cadence, target))
 
     def _advance_workout(self, paused: bool, dt: float) -> float | None:
         """Advance the workout, starting a lap on each new step.

@@ -67,6 +67,7 @@ class SourceSelector:
     _power_hist: dict[str, deque[tuple[float, float]]] = field(
         default_factory=dict, init=False, repr=False
     )
+    _last_snapshot_at: float | None = field(default=None, init=False, repr=False)
 
     def on_reading(self, r: Reading) -> None:
         """Record the metrics contained in a reading.
@@ -112,6 +113,22 @@ class SourceSelector:
         vals = [p for ts, p in self._power_hist[device_id] if now - ts <= self.AVG_WINDOW_S]
         return sum(vals) / len(vals) if vals else None
 
+    def _mean_power_since(self, device_id: str | None, since: float, now: float) -> float | None:
+        """Mean power of a device over the readings received in ``(since, now]``.
+
+        Args:
+            device_id (str | None): Device id; ``None`` always yields ``None``.
+            since (float): Start of the window (exclusive), monotonic time.
+            now (float): End of the window (inclusive), monotonic time.
+
+        Returns:
+            float | None: Mean power in watts, or ``None`` if no reading in the window.
+        """
+        if device_id is None or device_id not in self._power_hist:
+            return None
+        vals = [p for ts, p in self._power_hist[device_id] if since < ts <= now]
+        return sum(vals) / len(vals) if vals else None
+
     def _first(self, metric: str, candidates: list[str | None], now: float):
         """Return the first non-stale value of a metric among candidate devices.
 
@@ -141,6 +158,8 @@ class SourceSelector:
             Snapshot: The resolved metrics, including power averages and fallback warnings.
         """
         now = now if now is not None else time.monotonic()
+        since = self._last_snapshot_at if self._last_snapshot_at is not None else now - 1.0
+        self._last_snapshot_at = now
         pedals = assignment.power_id if assignment.has_pedals else None
         trainer = assignment.trainer_id
         power_candidates = [assignment.power_id, trainer]
@@ -160,6 +179,7 @@ class SourceSelector:
             trainer_power=self.value(trainer, "power", now),
             pedal_power=self.value(pedals, "power", now),
             power_source=power_source,
+            power_mean=self._mean_power_since(power_source, since, now),  # else: power
             power_avg=self._avg_power(power_source, now),
             pedal_avg=self._avg_power(pedals, now),
             trainer_avg=self._avg_power(trainer, now),

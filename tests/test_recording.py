@@ -85,3 +85,11 @@ def test_resume_appends_and_exports_fit(tmp_path):
     assert s.get_value("avg_power") > 180
     assert s.get_value("total_timer_time") < s.get_value("total_elapsed_time")  # gap not counted
     assert sum(1 for e in events if e.get_value("event_type") == "start") == 2
+
+
+def test_records_the_mean_power_of_the_second(tmp_path):
+    rec = Recorder.create(tmp_path, "Mean", 250, None, now=1_700_000_000)
+    rec.record(Snapshot(power=260, power_mean=230, cadence=90), 0, None, False, "erg")
+    [row] = rec.samples()
+    assert row["power"] == 230  # not the last reading (260)
+    rec.close()

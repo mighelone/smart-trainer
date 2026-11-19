@@ -11,6 +11,9 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 ## [Unreleased]
 
 ### Changed
+- Rides record the **mean power of each second** instead of the last power reading in it. Power
+  meters send 1–4 readings a second, so FIT files (and the live chart) are smoother and closer to
+  the work actually done, which also makes NP more accurate.
 - The live ride chart sends only the new points each second instead of the whole ride, so it
   stays light on long rides and over `--lan` (iPad, phone). Power and heart rate are drawn
   downsampled in the browser, keeping the peaks.

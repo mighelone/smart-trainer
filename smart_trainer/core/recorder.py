@@ -239,7 +239,7 @@ class Recorder:
                     elapsed,
                     self.lap,
                     int(paused),
-                    snap.power,
+                    snap.power_mean,  # the mean over the second, not the last reading
                     snap.trainer_power,
                     snap.pedal_power,
                     snap.cadence,

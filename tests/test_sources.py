@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from smart_trainer.config import PairedDevice
 from smart_trainer.core.devices import DeviceHub
 from smart_trainer.core.sources import SourceSelector
-from smart_trainer.core.state import Assignment, Reading, Role
+from smart_trainer.core.state import Assignment, Reading, Role, Snapshot
 
 PEDALS, TRAINER, HRM = "pedals", "trainer", "hrm"
 BOTH = Assignment({Role.TRAINER: TRAINER, Role.POWER: PEDALS, Role.HR: HRM})
@@ -86,3 +86,70 @@ def test_hub_publishes_and_persists_assignment():
     assert seen[-1].power_id == TRAINER and not seen[-1].has_pedals
     assert config.role_assignment == {"trainer": TRAINER, "power": PEDALS}
     assert config.power_source == "trainer" and config.saves == 2
+
+
+# ------------------------------------------------------------- power_mean (recorded)
+PEDALS_ONLY = Assignment({Role.POWER: PEDALS})
+TRAINER_AND_PEDALS = BOTH
+
+
+def _readings(sel: SourceSelector, device: str, values: list[float], start: float, hz: float):
+    for i, v in enumerate(values):
+        sel.on_reading(Reading(device, power=v, cadence=90, ts=start + (i + 1) / hz))
+
+
+def test_power_mean_at_4_hz_is_the_mean_of_the_second():
+    sel = SourceSelector()
+    sel.create_snapshot(PEDALS_ONLY, now=99.0)
+    _readings(sel, PEDALS, [180, 200, 220, 240], start=99.0, hz=4)  # 99.25 ... 100.0
+    snap = sel.create_snapshot(PEDALS_ONLY, now=100.0)
+    assert snap.power == 240  # the latest reading
+    assert snap.power_mean == 210  # what gets recorded
+
+
+def test_power_mean_only_counts_readings_since_the_previous_snapshot():
+    sel = SourceSelector()
+    sel.create_snapshot(PEDALS_ONLY, now=99.0)
+    _readings(sel, PEDALS, [100, 300], start=99.0, hz=2)  # 99.5, 100.0
+    assert sel.create_snapshot(PEDALS_ONLY, now=100.0).power_mean == 200
+    _readings(sel, PEDALS, [400], start=100.0, hz=1)  # 101.0
+    assert sel.create_snapshot(PEDALS_ONLY, now=101.0).power_mean == 400
+
+
+def test_power_mean_at_1_hz_and_without_a_reading_in_the_second():
+    sel = SourceSelector()
+    sel.create_snapshot(PEDALS_ONLY, now=99.0)
+    _readings(sel, PEDALS, [250], start=99.0, hz=1.25)  # 99.8
+    assert sel.create_snapshot(PEDALS_ONLY, now=100.0).power_mean == 250
+    # no reading in (100, 101]: the latest (not stale yet) stands for the second
+    snap = sel.create_snapshot(PEDALS_ONLY, now=101.0)
+    assert snap.power_mean == snap.power == 250
+
+
+def test_power_mean_spans_a_late_tick():
+    sel = SourceSelector()
+    sel.create_snapshot(PEDALS_ONLY, now=100.0)
+    _readings(sel, PEDALS, [100, 200, 300], start=100.0, hz=1)  # 101, 102, 103
+    assert sel.create_snapshot(PEDALS_ONLY, now=103.0).power_mean == 200
+
+
+def test_first_power_mean_uses_the_last_second():
+    sel = SourceSelector()
+    sel.on_reading(Reading(PEDALS, power=500, ts=98.5))  # older than a second
+    sel.on_reading(Reading(PEDALS, power=100, ts=99.5))
+    sel.on_reading(Reading(PEDALS, power=200, ts=100.0))
+    assert sel.create_snapshot(PEDALS_ONLY, now=100.0).power_mean == 150
+
+
+def test_power_mean_follows_the_power_source_fallback():
+    sel = SourceSelector()
+    sel.create_snapshot(TRAINER_AND_PEDALS, now=99.0)
+    sel.on_reading(Reading(PEDALS, power=200, ts=95.0))  # stale by now
+    _readings(sel, TRAINER, [190, 210], start=99.0, hz=2)
+    snap = sel.create_snapshot(TRAINER_AND_PEDALS, now=100.0)
+    assert snap.power_source == TRAINER and snap.power_mean == 200
+
+
+def test_hand_built_snapshot_records_its_power():
+    assert Snapshot(power=180).power_mean == 180
+    assert Snapshot(power=180, power_mean=175).power_mean == 175
