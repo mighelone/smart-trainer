@@ -10,6 +10,13 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Fixed
+- Trainer command timing (the periodic resend and the pedal power matching's settle time) now
+  uses a monotonic clock, so a system clock change or sleep/wake no longer disturbs it.
+- The workout clock advances by the real time between engine ticks (capped at 5 s) instead of a
+  fixed second, so a late tick no longer makes it drift. Resuming a crashed session restores the
+  active time the same way.
+
 ## [0.3.0] - 2026-11-19
 
 ### Added
