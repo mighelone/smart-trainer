@@ -114,6 +114,9 @@ class Snapshot:
         trainer_power (float | None): Power reported by the trainer in watts.
         pedal_power (float | None): Power reported by the pedals in watts.
         power_source (str | None): Device id actually used for ``power``.
+        power_mean (float | None): Mean of the ``power_source`` readings since the
+            previous snapshot (one engine tick, so the 1 s mean): what is recorded.
+            ``power`` (the latest reading) when none arrived in that time.
         power_avg (float | None): 3 s average of ``power`` from ``power_source``.
         pedal_avg (float | None): 3 s average of the pedal power.
         trainer_avg (float | None): 3 s average of the trainer power.
@@ -128,7 +131,13 @@ class Snapshot:
     trainer_power: float | None = None
     pedal_power: float | None = None
     power_source: str | None = None  # device id actually used for `power`
+    power_mean: float | None = None
     power_avg: float | None = None
     pedal_avg: float | None = None
     trainer_avg: float | None = None
     warnings: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Without a mean (e.g. built by hand), the latest reading stands for the second."""
+        if self.power_mean is None:
+            object.__setattr__(self, "power_mean", self.power)  # frozen: set it once here
