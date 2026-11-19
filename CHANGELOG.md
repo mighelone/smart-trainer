@@ -14,6 +14,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 - The live ride chart sends only the new points each second instead of the whole ride, so it
   stays light on long rides and over `--lan` (iPad, phone). Power and heart rate are drawn
   downsampled in the browser, keeping the peaks.
+- The device chips in the header are no longer rebuilt every 2 seconds on every page: only a
+  chip whose device changes state is updated.
 - After **Skip**, the power trace stays where it was ridden instead of shifting to line up with
   the new workout time.
 - **History** opens quickly however many rides you have: it shows the 30 most recent sessions
