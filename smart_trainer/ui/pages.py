@@ -30,11 +30,13 @@ from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.ui.connections import connection_card
 from smart_trainer.ui.theme import apply_theme
 from smart_trainer.ui.widgets import (
+    CuePlayer,
     LiveChart,
     Tile,
     fmt,
     fmt_time,
     hr_zone,
+    next_step_text,
     power_zone,
     workout_chart,
 )
@@ -326,6 +328,7 @@ class RidePage:
             self.holder = ui.card().classes("w-full p-2")
             self._build_controls()
             self._build_manual()
+        self.cues = CuePlayer(e.ride, lambda: S.settings.interval_cues)
 
     # ------------------------------------------------------------- build
     def _build_tiles(self) -> None:
@@ -514,6 +517,7 @@ class RidePage:
         self.warn.set_visibility(bool(status))
         self._refresh_controls(riding, r is not None)
         self._refresh_manual(manual=not (r and e.ride.erg_enabled))
+        self.cues.check()
 
     def _show_workout_step(self, r: WorkoutRunner) -> None:
         """Show the elapsed time and the current/next interval of a running workout.
@@ -527,10 +531,7 @@ class RidePage:
         self.step_label.set_text(st.text or ("Free ride" if st.free_ride else f"Interval {i + 1}"))
         nxt = r.next_step()
         if nxt:
-            prefix = f"{nxt.text} · " if nxt.text else ""
-            self.next_label.set_text(
-                f"Next · {prefix}{fmt(nxt.target_w(0, r.ftp))} W for {fmt_time(nxt.duration_s)}"
-            )
+            self.next_label.set_text(f"Next · {next_step_text(nxt, r.ftp, r.intensity)}")
         else:
             self.next_label.set_text("Last interval")
         self.step_bar.set_value(min(1.0, into / st.duration_s) if st.duration_s else 0)
@@ -706,8 +707,11 @@ def mini_page() -> None:
                 .classes("step-progress grow")
             )
 
+    cues = CuePlayer(e.ride, lambda: S.settings.interval_cues)
+
     def refresh() -> None:
         """Update tiles, step line and buttons from the engine state."""
+        cues.check()
         riding = e.ride.state == RideState.RIDING
         update_main_tiles(e, t_power, t_target, t_hr, t_cad)
         r = e.ride.runner
@@ -1416,6 +1420,8 @@ class SettingsPage:
             ui.separator()
             self._build_power_match()
             ui.separator()
+            self._build_ride()
+            ui.separator()
             self._build_connections()
 
     # ------------------------------------------------------------- build
@@ -1444,6 +1450,20 @@ class SettingsPage:
             "Settle time after target change (s)", value=pm.settle_s, min=0, max=30
         )
         ui.button("Save", icon="save", on_click=self.save).props("color=positive").classes("mt-2")
+
+    def _build_ride(self) -> None:
+        """Build the ride section: interval cues."""
+        ui.label("Ride").classes("section-title mt-2")
+        with ui.row().classes("items-center gap-2"):
+            self.cues = ui.switch(
+                "Beep and show the next interval 5 s before it starts",
+                value=self.st.interval_cues,
+                on_change=self.toggle_cues,
+            ).mark("interval-cues")
+            ui.button(
+                "Test sound", icon="volume_up", on_click=lambda: CuePlayer.beep(ui.context.client)
+            ).props("flat color=secondary")
+        CuePlayer.install()
 
     def _build_connections(self) -> None:
         """Build the connections section: automatic upload and one card per connection."""
@@ -1526,6 +1546,11 @@ class SettingsPage:
             pm.settle_s = float(self.settle.value)
         st.save()
         ui.notify("Settings saved", type="positive")
+
+    def toggle_cues(self) -> None:
+        """Persist the interval cues switch."""
+        self.st.interval_cues = bool(self.cues.value)
+        self.st.save()
 
     def toggle_auto(self) -> None:
         """Persist the global automatic upload switch."""

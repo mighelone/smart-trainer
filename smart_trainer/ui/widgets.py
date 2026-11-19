@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
-from nicegui import ui
+from nicegui import Client, ui
 
 from smart_trainer.config import DEFAULT_POWER_ZONES
 from smart_trainer.core.history import History, HistoryPoint
-from smart_trainer.core.workout import Workout, WorkoutRunner
+from smart_trainer.core.ride import Ride
+from smart_trainer.core.workout import Step, Workout, WorkoutRunner
 
 
 def fmt_time(seconds: float | None) -> str:
@@ -436,3 +438,104 @@ class LiveChart:
         self.chart.client.run_javascript(
             _APPEND_JS % {"id": self.chart.id, "data": json.dumps(payload)}
         )
+
+
+# Defines window.smartTrainerBeep(count) once per page: short beeps made with the Web Audio
+# API (no sound file). Browsers only allow audio after a user gesture, so the first click or
+# key press on the page unlocks it (pressing Start does).
+BEEP_JS = """
+window.smartTrainerBeep ??= (() => {
+  let ctx = null;
+  const audio = () => (ctx ??= new (window.AudioContext || window.webkitAudioContext)());
+  const unlock = () => { if (audio().state === "suspended") audio().resume(); };
+  for (const ev of ["pointerdown", "keydown"]) {
+    document.addEventListener(ev, unlock, {capture: true});
+  }
+  return (count = 2) => {
+    const c = audio();
+    if (c.state === "suspended") c.resume();
+    const t0 = c.currentTime + 0.05;
+    for (let i = 0; i < count; i++) {
+      const osc = c.createOscillator(), gain = c.createGain();
+      const t = t0 + i * 0.25;
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      osc.connect(gain).connect(c.destination);
+      osc.start(t);
+      osc.stop(t + 0.16);
+    }
+  };
+})();
+"""
+
+
+def next_step_text(step: Step, ftp: int, intensity: float = 1.0) -> str:
+    """Describe a step for the "next" line and the cue: cue text, target and duration.
+
+    Args:
+        step (Step): The step.
+        ftp (int): Rider's FTP in watts.
+        intensity (float): Workout intensity multiplier.
+
+    Returns:
+        str: E.g. ``"Sprint · 400 W for 00:30"`` or ``"Free ride for 05:00"``.
+    """
+    prefix = f"{step.text} · " if step.text else ""
+    target = step.target_w(0, ftp)
+    what = "Free ride" if target is None else f"{fmt(target * intensity)} W"
+    return f"{prefix}{what} for {fmt_time(step.duration_s)}"
+
+
+class CuePlayer:
+    """Plays a beep and shows the next step when the ride announces a step change.
+
+    Create it while building a page: cues raised before the page opened aren't played.
+
+    Attributes:
+        BEEPS (int): Beeps per cue.
+    """
+
+    BEEPS = 2
+
+    def __init__(self, ride: Ride, enabled: Callable[[], bool]) -> None:
+        """Install the beep in the page and remember the cues already raised.
+
+        Args:
+            ride (Ride): The ride whose cues are played.
+            enabled (Callable[[], bool]): Whether cues are on (read at each cue, so
+                the Settings switch applies right away).
+        """
+        self.ride = ride
+        self.enabled = enabled
+        self.client = ui.context.client
+        self.seen = ride.cue.seq if ride.cue else 0
+        self.install()
+
+    @staticmethod
+    def install() -> None:
+        """Define the beep in the page being built."""
+        ui.add_head_html(f"<script>{BEEP_JS}</script>")
+
+    def check(self) -> None:
+        """Play the latest cue if it's new (and cues are on)."""
+        cue, runner = self.ride.cue, self.ride.runner
+        if cue is None or cue.seq <= self.seen:
+            return
+        self.seen = cue.seq
+        if not self.enabled() or runner is None:
+            return
+        self.beep(self.client, self.BEEPS)
+        text = next_step_text(cue.next_step, runner.ftp, runner.intensity)
+        ui.notify(f"In {cue.in_s:.0f} s · {text}", position="top", timeout=cue.in_s * 1000)
+
+    @staticmethod
+    def beep(client: Client, count: int = 2) -> None:
+        """Play the beeps in a page.
+
+        Args:
+            client (Client): The page's client.
+            count (int): Number of beeps.
+        """
+        client.run_javascript(f"window.smartTrainerBeep?.({count})")
