@@ -30,6 +30,7 @@ from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.ui.connections import connection_card
 from smart_trainer.ui.theme import apply_theme
 from smart_trainer.ui.widgets import (
+    LiveChart,
     Tile,
     fmt,
     fmt_time,
@@ -282,6 +283,7 @@ class RidePage:
         self.e = e
         self.ftp = S.settings.ftp
         self.chart = None
+        self.live: LiveChart | None = None
         self.chart_workout: object = object()
         self.ticks = 0
         with ui.column().classes("page"):
@@ -455,6 +457,7 @@ class RidePage:
         self.holder.clear()
         with self.holder:
             self.chart = workout_chart(wo, self.ftp)
+        self.live = LiveChart(self.chart, e.ride, free_ride=wo is None)
         self.chart_workout = wo
 
     def refresh(self) -> None:
@@ -549,27 +552,9 @@ class RidePage:
             self.mode.value = c.mode.value
 
     def refresh_chart(self) -> None:
-        """Update the live power and heart-rate series of the chart."""
-        e = self.e
-        ch = self.chart
-        if ch is None or not e.ride.history:
-            return
-        hist = list(e.ride.history)
-        step = max(1, len(hist) // 1500)
-        # x = workout elapsed: approximate with recorded active seconds
-        offset = e.ride.runner.elapsed - hist[-1].t if e.ride.runner is not None else 0.0
-        ch.options["series"][1]["data"] = [
-            [round(p.t + offset), p.power] for p in hist[::step] if p.power is not None
-        ]
-        ch.options["series"][2]["data"] = [
-            [round(p.t + offset), p.hr] for p in hist[::step] if p.hr
-        ]
-        if e.ride.runner is None:
-            end = max(600, hist[-1].t)
-            ch.options["xAxis"]["max"] = end
-            ch.options["xAxis"]["min"] = max(0, end - 1200)
-            ch.options["series"][0]["data"] = []
-        ch.update()
+        """Send the new live power and heart-rate points to the chart."""
+        if self.live is not None:
+            self.live.sync()
 
     def loop(self) -> None:
         """Refresh the page, and the chart every other call."""

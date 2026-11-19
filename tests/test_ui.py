@@ -130,3 +130,17 @@ async def test_history_lists_sessions_and_loads_more(user: User, engine, pages, 
     await user.should_not_see("Ride 0")
     user.find(marker="history-more").click()
     await user.should_see("Ride 0", retries=20)
+
+
+async def test_ride_chart_gets_live_points(user: User, engine, pages):
+    await user.open("/")
+    user.find("Start").click()
+    assert engine.ride.state == RideState.RIDING
+    for _ in range(40):  # the engine ticks at 1 Hz, the chart refreshes every second
+        await asyncio.sleep(0.1)
+        assert user.client is not None
+        charts = [el for el in user.client.elements.values() if isinstance(el, pages.ui.echart)]
+        if charts and len(charts[0].options["series"][1]["data"]) >= 2:  # redraw + append
+            break
+    else:
+        raise AssertionError("the chart never got live power points")
