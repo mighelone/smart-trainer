@@ -33,11 +33,13 @@ from smart_trainer.ui.widgets import (
     CuePlayer,
     LiveChart,
     Tile,
+    cadence_display,
     fmt,
     fmt_time,
     hr_zone,
     next_step_text,
     power_zone,
+    step_title,
     workout_chart,
 )
 
@@ -248,6 +250,9 @@ def ride_status(e: Engine) -> list[str]:
         status.append("PAUSED")
     elif e.ride.state == RideState.RIDING and e.ride.auto_paused:
         status.append("Auto-paused: start pedalling")
+    elif e.ride.cadence_alert and e.ride.cadence_target is not None:
+        cad = fmt(e.snapshot.cadence)
+        status.append(f"Cadence {e.ride.cadence_alert}: {cad} / {e.ride.cadence_target} rpm")
     status += e.snapshot.warnings
     if e.devices.device_for(Role.TRAINER) and not e.devices.trainer_connected():
         status.append("Trainer disconnected: reconnecting…")
@@ -293,8 +298,9 @@ def update_main_tiles(e: Engine, t_power: Tile, t_target: Tile, t_hr: Tile, t_ca
     max_hr = S.settings.max_hr
     t_hr.set(fmt(snap.hr), f"{snap.hr / max_hr:.0%} of max" if snap.hr and max_hr else "")
     t_hr.set_zone(*hr_zone(snap.hr, S.settings.hr_zones))
-    st = e.ride.runner.current()[1] if e.ride.runner else None
-    t_cad.set(fmt(snap.cadence), f"target {st.cadence} rpm" if st and st.cadence else "")
+    cad_sub, cad_accent, cad_badge = cadence_display(e.ride.cadence_target, e.ride.cadence_alert)
+    t_cad.set(fmt(snap.cadence), cad_sub)
+    t_cad.set_zone(cad_accent, cad_badge)
 
 
 # ===================================================================== RIDE
@@ -528,7 +534,7 @@ class RidePage:
         i, st, into, left = r.current()
         self.t_time.set(fmt_time(r.elapsed), f"of {fmt_time(r.workout.duration_s)}")
         self.t_step.set(fmt_time(left), f"step {i + 1} of {len(r.workout.steps)}")
-        self.step_label.set_text(st.text or ("Free ride" if st.free_ride else f"Interval {i + 1}"))
+        self.step_label.set_text(step_title(i, st))
         nxt = r.next_step()
         if nxt:
             self.next_label.set_text(f"Next · {next_step_text(nxt, r.ftp, r.intensity)}")
@@ -718,8 +724,9 @@ def mini_page() -> None:
         if r:
             i, st, into, left = r.current()
             t_step.set(fmt_time(left), f"{i + 1}/{len(r.workout.steps)} · {r.intensity:.0%}")
-            label = st.text or ("Free ride" if st.free_ride else f"Interval {i + 1}")
-            text = f"{label} · {fmt_time(r.elapsed)} of {fmt_time(r.workout.duration_s)}"
+            text = (
+                f"{step_title(i, st)} · {fmt_time(r.elapsed)} of {fmt_time(r.workout.duration_s)}"
+            )
             step_bar.set_value(min(1.0, into / st.duration_s) if st.duration_s else 0)
         else:
             t_step.set("--", "free ride" if riding else "")

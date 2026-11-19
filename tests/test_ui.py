@@ -247,3 +247,43 @@ async def test_settings_switch_turns_cues_off(user: User, engine, pages):
     await user.open("/settings")
     user.find(marker="interval-cues").click()
     assert pages.S.settings.model_dump()["interval_cues"] is False
+
+
+def _cadence_workout():
+    import json
+    from pathlib import Path
+
+    from smart_trainer.core.workout import parse_intervals_doc
+
+    doc = json.loads((Path(__file__).parent / "data" / "cadence_endurance_doc.json").read_text())
+    return parse_intervals_doc(doc, name="Cadence", ftp=200)
+
+
+async def test_ride_page_shows_cadence_targets(user: User, engine, pages):
+    pages.S.selected = _cadence_workout()  # warmup 85 rpm, then 100 / 70 rpm intervals
+    await user.open("/")
+    user.find("Start").click()
+    await user.should_see("Warmup · 85 rpm", retries=20)  # step card
+    await user.should_see("target 85 rpm", retries=20)  # cadence tile
+    await user.should_see("@ 100 rpm")  # next line
+    engine.ride.skip_step()
+    await user.should_see("High Cadence · 100 rpm", retries=20)
+
+
+async def test_cadence_alert_on_ride_and_mini(user: User, engine, pages):
+    pages.S.selected = _cadence_workout()
+    await user.open("/")
+    user.find("Start").click()
+    engine.ride.skip_step()
+    engine.ride.skip_step()  # "Low Cadence" at 70 rpm; the fake devices ride ~90 rpm
+    await user.should_see("Low Cadence · 70 rpm", retries=20)
+    for _ in range(80):  # the alert needs 5 s off target
+        await asyncio.sleep(0.1)
+        if engine.ride.cadence_alert:
+            break
+    assert engine.ride.cadence_alert == "high"
+    await user.should_see("target 70 rpm · ease off", retries=20)
+    await user.should_see("HIGH")
+    await user.should_see("Cadence high:", retries=20)
+    await user.open("/mini")
+    await user.should_see("Cadence high:", retries=20)  # replaces the step line
