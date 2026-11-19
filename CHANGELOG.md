@@ -21,6 +21,9 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   more than 10 rpm off the target for 5 seconds, the cadence tile turns amber with a LOW or HIGH
   badge and a "speed up"/"ease off" hint, and the status line (also on the mini overlay) shows
   "Cadence low: 78 / 100 rpm".
+- FIT files now carry **normalized power, intensity factor, TSS and work** for the ride, with the
+  FTP it was ridden at, plus normalized power and work for each lap (30 s or longer for NP), so
+  Strava, intervals.icu and Garmin tools show them as recorded.
 
 ### Changed
 - The "Next" line of a workout shows the target with the current intensity applied.

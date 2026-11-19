@@ -24,6 +24,12 @@ from fit_tool.profile.profile_type import (
     SubSport,
 )
 
+from smart_trainer.core.metrics import (
+    intensity_factor,
+    normalized_power,
+    training_stress_score,
+    work_j,
+)
 from smart_trainer.core.recorder import Recorder
 
 GAP_S = 5.0  # a hole longer than this (pause, crash) becomes a timer stop/start
@@ -111,6 +117,11 @@ def _fill_summary(msg, rows, start: float, end: float, timer_s: float) -> None:
         msg.max_heart_rate = round(s["max_hr"])
     if s["avg_cad"] is not None:
         msg.avg_cadence = round(s["avg_cad"])
+    powers = [r["power"] for r in rows]
+    if s["avg_power"] is not None:
+        msg.total_work = round(work_j(powers))
+    if (np_w := normalized_power(powers)) is not None:  # needs 30 s of power
+        msg.normalized_power = round(np_w)
 
 
 def _file_id(start: float) -> FileIdMessage:
@@ -223,13 +234,14 @@ def _laps(rows) -> list[LapMessage]:
     return out
 
 
-def _session(rows, timer_s: float, num_laps: int) -> SessionMessage:
-    """Build the session message.
+def _session(rows, timer_s: float, num_laps: int, ftp: int) -> SessionMessage:
+    """Build the session message, with intensity and training stress against ``ftp``.
 
     Args:
         rows (list[sqlite3.Row]): Unpaused samples, in time order.
         timer_s (float): Total timer time in seconds.
         num_laps (int): Number of laps in the session.
+        ftp (int): FTP the session was ridden at, in watts.
 
     Returns:
         SessionMessage: The session summary.
@@ -242,6 +254,11 @@ def _session(rows, timer_s: float, num_laps: int) -> SessionMessage:
     sess.first_lap_index = 0
     sess.num_laps = num_laps
     _fill_summary(sess, rows, rows[0]["t"], rows[-1]["t"], timer_s)
+    if ftp > 0:
+        sess.threshold_power = ftp
+        if (np_w := normalized_power(r["power"] for r in rows)) is not None:
+            sess.intensity_factor = intensity_factor(np_w, ftp)
+            sess.training_stress_score = training_stress_score(np_w, ftp, timer_s)
     return sess
 
 
@@ -269,7 +286,9 @@ def export_fit(rec: Recorder, out_path: Path) -> Path:
     """Export a recorded session to a FIT activity file.
 
     Paused samples are skipped and gaps longer than ``GAP_S`` become
-    timer stop/start events. One lap is written per recorded lap number.
+    timer stop/start events. One lap is written per recorded lap number. Laps and the
+    session carry work and normalized power; the session also carries the FTP it was
+    ridden at, the intensity factor and TSS.
 
     Args:
         rec (Recorder): The session to export.
@@ -291,7 +310,7 @@ def export_fit(rec: Recorder, out_path: Path) -> Path:
     laps = _laps(rows)
     for lap in laps:
         b.add(lap)
-    b.add(_session(rows, timer_s, len(laps)))
+    b.add(_session(rows, timer_s, len(laps), rec.info().ftp))
     b.add(_activity(rows[-1]["t"], timer_s))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,9 @@ import textwrap
 from pathlib import Path
 
 import fitdecode
+import pytest
 
+from smart_trainer.core.metrics import normalized_power, training_stress_score
 from smart_trainer.core.recorder import Recorder, find_unfinished
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import parse_intervals_doc
@@ -93,3 +95,55 @@ def test_records_the_mean_power_of_the_second(tmp_path):
     [row] = rec.samples()
     assert row["power"] == 230  # not the last reading (260)
     rec.close()
+
+
+def _fit_messages(fit) -> dict[str, list]:
+    out: dict[str, list] = {}
+    with fitdecode.FitReader(fit) as fr:
+        for frame in fr:
+            if isinstance(frame, fitdecode.FitDataMessage):
+                out.setdefault(frame.name, []).append(frame)
+    return out
+
+
+def test_fit_carries_np_if_tss_and_work(tmp_path):
+    t0 = 1_700_000_000
+    rec = Recorder.create(tmp_path, "Metrics", 250, None, now=t0)
+    for i in range(1200):  # lap 0: 20 min at 250 W (FTP)
+        rec.record(Snapshot(power=250, cadence=90), i, 250, False, "erg", now=t0 + i)
+    rec.new_lap()
+    for i in range(1200, 1220):  # lap 1: 20 s sprint, too short for NP
+        rec.record(Snapshot(power=500, cadence=110), i, 500, False, "erg", now=t0 + i)
+    fit = export_fit(rec, tmp_path / "metrics.fit")
+    rec.close()
+
+    msgs = _fit_messages(fit)
+    [session] = msgs["session"]
+    powers = [250.0] * 1200 + [500.0] * 20
+    np_w = normalized_power(powers)
+    assert np_w is not None
+    assert session.get_value("normalized_power") == round(np_w)
+    assert session.get_value("threshold_power") == 250
+    assert session.get_value("total_work") == 250 * 1200 + 500 * 20
+    timer_s = session.get_value("total_timer_time")
+    assert session.get_value("intensity_factor") == pytest.approx(np_w / 250, abs=0.001)
+    tss = training_stress_score(np_w, 250, timer_s)
+    assert session.get_value("training_stress_score") == pytest.approx(tss, abs=0.1)
+
+    long_lap, sprint = msgs["lap"]
+    assert long_lap.get_value("normalized_power") == 250
+    assert long_lap.get_value("total_work") == 250 * 1200
+    assert sprint.get_value("total_work") == 500 * 20
+    assert sprint.get_value("normalized_power", fallback=None) is None  # under 30 s
+
+
+def test_fit_without_power_has_no_power_metrics(tmp_path):
+    t0 = 1_700_000_000
+    rec = Recorder.create(tmp_path, "HR only", 250, None, now=t0)
+    for i in range(60):
+        rec.record(Snapshot(hr=130, cadence=85), i, None, False, "resistance", now=t0 + i)
+    fit = export_fit(rec, tmp_path / "hr.fit")
+    rec.close()
+    [session] = _fit_messages(fit)["session"]
+    for field in ("normalized_power", "total_work", "intensity_factor", "training_stress_score"):
+        assert session.get_value(field, fallback=None) is None
