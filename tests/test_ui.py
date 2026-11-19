@@ -10,7 +10,7 @@ from smart_trainer.ble import fake
 from smart_trainer.config import Settings
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
-from smart_trainer.core.state import Role
+from smart_trainer.core.state import ConnState, Role
 
 pytestmark = pytest.mark.nicegui_main_file("tests/ui_main.py")
 
@@ -144,3 +144,45 @@ async def test_ride_chart_gets_live_points(user: User, engine, pages):
             break
     else:
         raise AssertionError("the chart never got live power points")
+
+
+class _OutboxCounter:
+    """Counts the element updates and deletions a client sends."""
+
+    def __init__(self, client) -> None:
+        self.updated: list[str] = []
+        self.deleted = 0
+        outbox = client.outbox
+        real_update, real_delete = outbox.enqueue_update, outbox.enqueue_delete
+
+        def update(el):
+            self.updated.append(type(el).__name__)
+            real_update(el)
+
+        def delete(el):
+            self.deleted += 1
+            real_delete(el)
+
+        outbox.enqueue_update, outbox.enqueue_delete = update, delete
+
+
+async def test_riding_sends_only_what_changed(user: User, engine):
+    """Chips aren't rebuilt and the chart isn't resent: only changed tile values go out."""
+    await user.open("/")
+    user.find("Start").click()
+    await asyncio.sleep(1.5)  # first chart draw and first chip refresh
+    assert user.client is not None
+    sent = _OutboxCounter(user.client)
+    await asyncio.sleep(4.5)  # a few engine ticks, chart syncs and chip refreshes
+    assert sent.deleted == 0
+    assert "EChart" not in sent.updated  # new points go as a script, not the whole chart
+    assert set(sent.updated) <= {"Label", "LinearProgress"}  # tile values and step progress
+
+
+async def test_device_chip_follows_the_device_state(user: User, engine):
+    await user.open("/")
+    trainer = engine.devices.device_for(Role.TRAINER)
+    assert trainer is not None
+    await user.should_see(f"trainer: {trainer.name} (connected)", retries=20)
+    trainer.state = ConnState.DISCONNECTED
+    await user.should_see(f"trainer: {trainer.name} (disconnected)", retries=40)

@@ -111,28 +111,61 @@ def frame(title: str) -> None:
             ui.button(icon="picture_in_picture_alt", on_click=enter_mini).props(
                 "flat dense padding='6px 10px' color=grey-5"
             ).classes("nav-btn").mark("mini").tooltip("Mini overlay: stays on top of other windows")
-        chips = ui.row().classes("gap-2")
+        chips = DeviceChips(S.engine)
+    ui.timer(2.0, chips.refresh)
 
-    def refresh_chips() -> None:
-        """Redraw the device status chips."""
-        chips.clear()
-        e = S.engine
-        with chips:
-            for role in (Role.TRAINER, Role.POWER, Role.HR):
-                dev = e.devices.device_for(role)
-                color = DOT_COLOR[dev.state] if dev else DOT_COLOR[None]
-                tip = (
-                    f"{role.value}: {dev.name} ({dev.state})"
-                    if dev
-                    else f"{role.value}: not paired"
-                )
-                with ui.element("div").classes("dev-chip") as chip:
+
+class DeviceChips:
+    """Header chips with the state of the trainer, power meter and HR strap.
+
+    The chips are built once; :meth:`refresh` only changes the dot colour and the
+    tooltip of a chip when they change (NiceGUI then sends just that).
+
+    Attributes:
+        ROLES (tuple[Role, ...]): Roles shown, in order.
+        e (Engine): The application engine.
+    """
+
+    ROLES = (Role.TRAINER, Role.POWER, Role.HR)
+
+    def __init__(self, e: Engine) -> None:
+        """Build the chips and show the current state.
+
+        Args:
+            e (Engine): The application engine.
+        """
+        self.e = e
+        self._dots: dict[Role, ui.element] = {}
+        self._tips: dict[Role, ui.tooltip] = {}
+        with ui.row().classes("gap-2"):
+            for role in self.ROLES:
+                with ui.element("div").classes("dev-chip").mark(f"chip-{role.value}"):
                     ui.icon(ROLE_ICON[role], size="16px")
-                    ui.element("span").classes("dev-dot").style(f"background: {color}")
-                chip.tooltip(tip)
+                    self._dots[role] = ui.element("span").classes("dev-dot")
+                    self._tips[role] = ui.tooltip("")
+        self.refresh()
 
-    refresh_chips()
-    ui.timer(2.0, refresh_chips)
+    @staticmethod
+    def describe(role: Role, dev: Device | None) -> tuple[str, str]:
+        """Colour and tooltip of a chip.
+
+        Args:
+            role (Role): The role shown.
+            dev (Device | None): The device in that role, if one is paired.
+
+        Returns:
+            tuple[str, str]: The dot colour and the tooltip text.
+        """
+        if dev is None:
+            return DOT_COLOR[None], f"{role.value}: not paired"
+        return DOT_COLOR[dev.state], f"{role.value}: {dev.name} ({dev.state})"
+
+    def refresh(self) -> None:
+        """Update the chips from the devices (unchanged chips send nothing)."""
+        for role in self.ROLES:
+            color, tip = self.describe(role, self.e.devices.device_for(role))
+            self._dots[role].style(replace=f"background: {color}")
+            self._tips[role].set_text(tip)
 
 
 # ============================================================ WINDOW MODES
