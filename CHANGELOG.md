@@ -10,6 +10,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-19
+
 ### Added
 - In the desktop window (`--native`, and the packaged app) logs are saved to
   `logs/smart-trainer.log` in the app data folder, rotated at ~1 MB (the last five files are
