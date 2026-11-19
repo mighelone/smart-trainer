@@ -282,6 +282,32 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
         finally:
             self.has_control = False  # retake control (and restart) on the next command
 
+    @staticmethod
+    def _spin_down_prompt(
+        phase: CalibrationPhase,
+        speed: float | None,
+        target: str,
+        high: float | None,
+        coast_from: float | None,
+    ) -> tuple[str, float | None]:
+        """Build the rider instruction and progress fraction for a spin-down phase.
+
+        Args:
+            phase (CalibrationPhase): Current phase (speed up or coast).
+            speed (float | None): Current speed in km/h.
+            target (str): Human-readable target speed.
+            high (float | None): Upper target speed in km/h, if known.
+            coast_from (float | None): Speed the coast started from, if known.
+
+        Returns:
+            tuple[str, float | None]: The message and the progress fraction (0-1), if known.
+        """
+        if phase == CalibrationPhase.SPEED_UP:
+            msg = f"Pedal up to {target} and hold it until the trainer says stop."
+            return msg, min(1.0, (speed or 0) / high) if high else None
+        msg = "Stop pedalling and let the flywheel coast. Don't touch the pedals."
+        return msg, 1 - min(1.0, (speed or 0) / coast_from) if coast_from else None
+
     async def _run_spin_down(
         self, on_progress: ProgressCallback, low: float | None, high: float | None
     ) -> CalibrationResult:
@@ -309,12 +335,7 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
             if loop.time() > deadline:
                 raise CalibrationError("The spin-down timed out. Try again.")
             speed = self.speed_kmh
-            if phase == CalibrationPhase.SPEED_UP:
-                msg = f"Pedal up to {target} and hold it until the trainer says stop."
-                frac = min(1.0, (speed or 0) / high) if high else None
-            else:
-                msg = "Stop pedalling and let the flywheel coast. Don't touch the pedals."
-                frac = 1 - min(1.0, (speed or 0) / coast_from) if coast_from else None
+            msg, frac = self._spin_down_prompt(phase, speed, target, high, coast_from)
             on_progress(CalibrationProgress(phase, msg, speed, low, high, frac))
             try:
                 st = await asyncio.wait_for(self._status.get(), 0.5)
