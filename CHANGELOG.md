@@ -10,6 +10,13 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Changed
+- **History** opens quickly however many rides you have: it shows the 30 most recent sessions
+  with **Load more** for older ones, reads them in the background, and only re-reads sessions
+  that changed since the last time.
+- **Finish** no longer freezes the app while the FIT file of a long ride is written: the export
+  runs in the background.
+
 ### Fixed
 - Trainer command timing (the periodic resend and the pedal power matching's settle time) now
   uses a monotonic clock, so a system clock change or sleep/wake no longer disturbs it.

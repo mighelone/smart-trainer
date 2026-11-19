@@ -111,3 +111,22 @@ async def test_start_in_mini(user: User, engine, pages):
     await user.open("/")
     await user.should_see(marker="mini-expand", retries=20)
     assert not pages.S.start_mini
+
+
+async def test_history_lists_sessions_and_loads_more(user: User, engine, pages, monkeypatch):
+    from smart_trainer.core.recorder import Recorder
+    from smart_trainer.core.state import Snapshot
+
+    monkeypatch.setattr(pages.HistoryPage, "PAGE_SIZE", 2)
+    for i in range(3):
+        now = 1_700_000_000 + i * 3600
+        rec = Recorder.create(engine.store.directory, f"Ride {i}", 200, None, now=now)
+        rec.record(Snapshot(power=200, cadence=90), 0, None, False, "erg", now=now)
+        rec.set_status("finished")
+        rec.close()
+    await user.open("/history")
+    await user.should_see("Ride 2", retries=20)
+    await user.should_see("Ride 1")
+    await user.should_not_see("Ride 0")
+    user.find(marker="history-more").click()
+    await user.should_see("Ride 0", retries=20)
