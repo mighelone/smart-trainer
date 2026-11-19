@@ -194,15 +194,20 @@ def log_path() -> Path:
     return APP_DIR / "logs" / "smart-trainer.log"
 
 
-def setup_logging(level: int = logging.INFO) -> Path:
-    """Log to the console and to a size-rotated file in the app directory.
+def setup_logging(to_file: bool, level: int = logging.INFO) -> Path | None:
+    """Log either to a size-rotated file in the app directory or to the console.
 
     Args:
+        to_file (bool): Write to the rotating log file (e.g. in the native app, which
+            has no console) instead of the console (stderr).
         level (int): Root logger level.
 
     Returns:
-        Path: The log file path.
+        Path | None: The log file path, or ``None`` when logging to the console.
     """
+    if not to_file:
+        logging.basicConfig(level=level, format=LOG_FORMAT)
+        return None
     from logging.handlers import RotatingFileHandler
 
     p = log_path()
@@ -211,8 +216,7 @@ def setup_logging(level: int = logging.INFO) -> Path:
         p, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
     )
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    logging.basicConfig(level=level, format=LOG_FORMAT)  # console (stderr)
-    logging.getLogger().addHandler(file_handler)
+    logging.basicConfig(level=level, handlers=[file_handler])
     return p
 
 

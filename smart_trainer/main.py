@@ -96,7 +96,8 @@ def run() -> None:
         args.native = True
         S.start_mini = True
         app.native.window_args["on_top"] = True
-    log.info("logging to %s", setup_logging())
+    if log_file := setup_logging(to_file=args.native):
+        log.info("logging to %s", log_file)
 
     app.on_startup(lambda: _startup(args.fake))
     app.on_shutdown(_lifetime.aclose)
