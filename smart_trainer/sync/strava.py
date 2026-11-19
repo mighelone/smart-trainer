@@ -143,12 +143,16 @@ class StravaClient:
             self._token_url,
             data={"client_id": self.client_id, "client_secret": self.client_secret, **params},
         )
-        if r.status_code in (400, 401, 403):
+        if r.status_code in {
+            httpx.codes.BAD_REQUEST,
+            httpx.codes.UNAUTHORIZED,
+            httpx.codes.FORBIDDEN,
+        }:
             raise StravaError(
                 "Strava rejected the authorization: check the Client ID/Secret and "
                 "reconnect in Settings"
             )
-        if r.status_code >= 400:
+        if r.is_error:
             raise StravaError(f"Strava error {r.status_code}: {r.text[:200]}")
         data = r.json()
         self._access = data["access_token"]
@@ -200,11 +204,11 @@ class StravaClient:
         """
         headers = {"Authorization": f"Bearer {await self._access_token()}"}
         r = await self._client.request(method, url, headers=headers, **kw)
-        if r.status_code == 401:
+        if r.status_code == httpx.codes.UNAUTHORIZED:
             raise StravaError("Strava authorization expired or revoked: reconnect in Settings")
-        if r.status_code == 429:
+        if r.status_code == httpx.codes.TOO_MANY_REQUESTS:
             raise StravaError("Strava rate limit reached: try again later")
-        if r.status_code >= 400:
+        if r.is_error:
             raise StravaError(f"Strava error {r.status_code}: {r.text[:200]}")
         return r
 

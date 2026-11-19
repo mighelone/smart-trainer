@@ -37,7 +37,7 @@ def project_version(root: Path = ROOT) -> str:
 def main() -> None:
     """Print the version, or check it against a tag given with ``--check``."""
     version = project_version()
-    if len(sys.argv) == 3 and sys.argv[1] == "--check":
+    if len(sys.argv) == 3 and sys.argv[1] == "--check":  # noqa: PLR2004
         tag = sys.argv[2]
         if tag.removeprefix("v") != version:
             raise SystemExit(

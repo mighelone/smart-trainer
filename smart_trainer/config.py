@@ -48,6 +48,9 @@ class PowerMatch(BaseModel):
         max_offset_w (float): Maximum correction applied to the target, in watts.
         settle_s (float): Seconds to wait after a target change before adapting.
         min_cadence (float): Minimum cadence (rpm) to consider the rider pedalling.
+        min_power_w (float): Minimum average power (W) for a sample to be used when adapting.
+        ratio_min (float): Lowest trainer/pedal ratio accepted as plausible.
+        ratio_max (float): Highest trainer/pedal ratio accepted as plausible.
     """
 
     ratio_alpha: float = 0.08  # EMA weight for the trainer/pedal power ratio
@@ -55,6 +58,9 @@ class PowerMatch(BaseModel):
     max_offset_w: float = 60.0
     settle_s: float = 5.0
     min_cadence: float = 40.0
+    min_power_w: float = 30.0
+    ratio_min: float = 0.7
+    ratio_max: float = 1.3
 
 
 class ConnectionSettings(BaseModel):

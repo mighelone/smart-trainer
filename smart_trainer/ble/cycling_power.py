@@ -25,6 +25,7 @@ from smart_trainer.ble.parsers import (
     CadenceCalculator,
     ControlResponse,
     CpOp,
+    ResultCode,
     cmd_start_offset_compensation,
     format_offset,
     parse_cp_control_response,
@@ -124,6 +125,47 @@ class PowerMeter(BleakDevice, Calibratable):
             raise CalibrationError("This power meter does not support calibration.") from exc
         self._cp_client = client
 
+    async def _read_torque_based(self, client: BleakClient) -> bool | None:
+        """Read the Cycling Power Feature to learn whether the meter is torque based.
+
+        Args:
+            client (BleakClient): Connected client.
+
+        Returns:
+            bool | None: Whether offsets are torque values, or ``None`` if unreadable.
+        """
+        try:
+            feature = parse_cp_feature(
+                bytes(await client.read_gatt_char(uuids.CYCLING_POWER_FEATURE))
+            )
+        except Exception as exc:
+            log.info("%s: cannot read cycling power features (%s)", self.name, exc)
+            return None
+        if not feature.offset_compensation:
+            log.info("%s: offset compensation not advertised, trying anyway", self.name)
+        return feature.torque_based
+
+    async def _await_offset_response(self) -> ControlResponse:
+        """Wait for the response to *Start Offset Compensation*.
+
+        Returns:
+            ControlResponse: The meter's response.
+
+        Raises:
+            CalibrationError: If the meter doesn't answer in time.
+        """
+        try:
+            async with asyncio.timeout(self.OFFSET_TIMEOUT):
+                while True:
+                    resp = await self._responses.get()
+                    if resp.request_op == CpOp.START_OFFSET_COMPENSATION:
+                        return resp
+        except TimeoutError:
+            raise CalibrationError(
+                "The power meter did not answer. Wake it up by turning the cranks, "
+                "then keep them still and try again."
+            ) from None
+
     async def calibrate(self, on_progress: ProgressCallback) -> CalibrationResult:
         """Run a zero-offset calibration (*Start Offset Compensation*).
 
@@ -145,33 +187,14 @@ class PowerMeter(BleakDevice, Calibratable):
             )
         )
         await self._subscribe_control_point(client)
-        torque_based = None
-        try:
-            feature = parse_cp_feature(
-                bytes(await client.read_gatt_char(uuids.CYCLING_POWER_FEATURE))
-            )
-            torque_based = feature.torque_based
-            if not feature.offset_compensation:
-                log.info("%s: offset compensation not advertised, trying anyway", self.name)
-        except Exception as exc:
-            log.info("%s: cannot read cycling power features (%s)", self.name, exc)
+        torque_based = await self._read_torque_based(client)
         while not self._responses.empty():
             self._responses.get_nowait()
         await client.write_gatt_char(
             uuids.CYCLING_POWER_CONTROL_POINT, cmd_start_offset_compensation(), response=True
         )
-        try:
-            async with asyncio.timeout(self.OFFSET_TIMEOUT):
-                while True:
-                    resp = await self._responses.get()
-                    if resp.request_op == CpOp.START_OFFSET_COMPENSATION:
-                        break
-        except TimeoutError:
-            raise CalibrationError(
-                "The power meter did not answer. Wake it up by turning the cranks, "
-                "then keep them still and try again."
-            ) from None
-        if resp.result == 0x02:
+        resp = await self._await_offset_response()
+        if resp.result == ResultCode.NOT_SUPPORTED:
             raise CalibrationError("This power meter does not support zero-offset calibration.")
         if not resp.ok:
             raise CalibrationError(

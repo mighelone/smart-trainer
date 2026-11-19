@@ -6,7 +6,9 @@ All functions are side-effect free so they can be unit tested with captured payl
 from __future__ import annotations
 
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass
+from enum import IntEnum
 
 
 # --------------------------------------------------------------------------- HR
@@ -167,6 +169,23 @@ class IndoorBikeData:
     heart_rate: int | None = None
 
 
+_Decoder = Callable[[bytes, int], float | int]
+
+# Indoor Bike Data fields after instantaneous speed, in payload order:
+# (flag bit, IndoorBikeData attribute or None to skip, size in bytes, decoder(data, offset))
+_IBD_FIELDS: tuple[tuple[int, str | None, int, _Decoder | None], ...] = (
+    (0x0002, None, 2, None),  # average speed
+    (0x0004, "cadence_rpm", 2, lambda d, i: struct.unpack_from("<H", d, i)[0] / 2.0),  # 0.5 rpm
+    (0x0008, None, 2, None),  # average cadence
+    (0x0010, "distance_m", 3, lambda d, i: int.from_bytes(d[i : i + 3], "little")),  # uint24
+    (0x0020, "resistance_level", 2, lambda d, i: struct.unpack_from("<h", d, i)[0]),  # sint16
+    (0x0040, "power", 2, lambda d, i: struct.unpack_from("<h", d, i)[0]),  # sint16
+    (0x0080, None, 2, None),  # average power
+    (0x0100, None, 5, None),  # expended energy: total(2) per hour(2) per minute(1)
+    (0x0200, "heart_rate", 1, lambda d, i: d[i]),  # uint8
+)
+
+
 def parse_indoor_bike_data(data: bytes) -> IndoorBikeData:
     """Parse an FTMS Indoor Bike Data (0x2AD2) payload.
 
@@ -184,29 +203,12 @@ def parse_indoor_bike_data(data: bytes) -> IndoorBikeData:
     if not flags & 0x0001:  # bit0 == 0 means instantaneous speed IS present
         out.speed_kmh = struct.unpack_from("<H", data, i)[0] / 100.0
         i += 2
-    if flags & 0x0002:  # average speed
-        i += 2
-    if flags & 0x0004:  # instantaneous cadence (0.5 rpm)
-        out.cadence_rpm = struct.unpack_from("<H", data, i)[0] / 2.0
-        i += 2
-    if flags & 0x0008:  # average cadence
-        i += 2
-    if flags & 0x0010:  # total distance uint24
-        out.distance_m = int.from_bytes(data[i : i + 3], "little")
-        i += 3
-    if flags & 0x0020:  # resistance level sint16
-        out.resistance_level = struct.unpack_from("<h", data, i)[0]
-        i += 2
-    if flags & 0x0040:  # instantaneous power sint16
-        out.power = struct.unpack_from("<h", data, i)[0]
-        i += 2
-    if flags & 0x0080:  # average power
-        i += 2
-    if flags & 0x0100:  # expended energy: total(2) per hour(2) per minute(1)
-        i += 5
-    if flags & 0x0200:  # heart rate uint8
-        out.heart_rate = data[i]
-        i += 1
+    for flag, attr, size, decode in _IBD_FIELDS:
+        if not flags & flag:
+            continue
+        if attr is not None and decode is not None:
+            setattr(out, attr, decode(data, i))
+        i += size
     return out
 
 
@@ -223,6 +225,16 @@ class FtmsOp:
     SET_SIMULATION = 0x11
     SPIN_DOWN = 0x13
     RESPONSE = 0x80
+
+
+class ResultCode(IntEnum):
+    """FTMS / Cycling Power control point result codes."""
+
+    SUCCESS = 0x01
+    NOT_SUPPORTED = 0x02
+    INVALID_PARAMETER = 0x03
+    FAILED = 0x04
+    CONTROL_NOT_PERMITTED = 0x05
 
 
 def cmd_request_control() -> bytes:
@@ -315,13 +327,11 @@ class ControlResponse:
 
     Attributes:
         request_op (int): Op code of the command being answered.
-        result (int): Result code (0x01 success, 0x02 not supported,
-            0x03 invalid parameter, 0x04 failed, 0x05 not permitted).
+        result (int): Result code, see ``ResultCode``.
         params (bytes): Response parameters following the result code, if any.
     """
 
     request_op: int
-    # 0x01 success, 0x02 not supported, 0x03 invalid param, 0x04 failed, 0x05 not permitted
     result: int
     params: bytes = b""
 
@@ -330,9 +340,9 @@ class ControlResponse:
         """Whether the command succeeded.
 
         Returns:
-            bool: ``True`` if the result code is 0x01 (success).
+            bool: ``True`` if the result code is ``ResultCode.SUCCESS``.
         """
-        return self.result == 0x01
+        return self.result == ResultCode.SUCCESS
 
 
 def parse_control_response(data: bytes) -> ControlResponse | None:
@@ -350,12 +360,12 @@ def parse_control_response(data: bytes) -> ControlResponse | None:
     return None
 
 
-RESULT_TEXT = {
-    0x01: "success",
-    0x02: "not supported",
-    0x03: "invalid parameter",
-    0x04: "operation failed",
-    0x05: "control not permitted",
+RESULT_TEXT: dict[int, str] = {
+    ResultCode.SUCCESS: "success",
+    ResultCode.NOT_SUPPORTED: "not supported",
+    ResultCode.INVALID_PARAMETER: "invalid parameter",
+    ResultCode.FAILED: "operation failed",
+    ResultCode.CONTROL_NOT_PERMITTED: "control not permitted",
 }
 
 

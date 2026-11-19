@@ -113,6 +113,158 @@ def _fill_summary(msg, rows, start: float, end: float, timer_s: float) -> None:
         msg.avg_cadence = round(s["avg_cad"])
 
 
+def _file_id(start: float) -> FileIdMessage:
+    """Build the FIT file id message.
+
+    Args:
+        start (float): Unix start time of the session.
+
+    Returns:
+        FileIdMessage: The file id message.
+    """
+    fid = FileIdMessage()
+    fid.type = FileType.ACTIVITY
+    fid.manufacturer = Manufacturer.DEVELOPMENT.value
+    fid.product = 0
+    fid.serial_number = 0x5354524E
+    fid.time_created = _ms(start)
+    return fid
+
+
+def _timer_event(t: float, et: EventType) -> EventMessage:
+    """Build a timer event message.
+
+    Args:
+        t (float): Unix time of the event.
+        et (EventType): Event type (start or stop).
+
+    Returns:
+        EventMessage: The timer event.
+    """
+    e = EventMessage()
+    e.event = Event.TIMER
+    e.event_type = et
+    e.timestamp = _ms(t)
+    return e
+
+
+def _record(r) -> RecordMessage:
+    """Build a FIT record message from one sample.
+
+    Args:
+        r (sqlite3.Row): Recorded sample.
+
+    Returns:
+        RecordMessage: The record, with only the fields the sample has.
+    """
+    m = RecordMessage()
+    m.timestamp = _ms(r["t"])
+    if r["power"] is not None:
+        m.power = round(r["power"])
+    if r["hr"] is not None:
+        m.heart_rate = int(r["hr"])
+    if r["cadence"] is not None:
+        m.cadence = round(r["cadence"])
+    if r["speed_kmh"] is not None:
+        m.speed = r["speed_kmh"] / 3.6
+    if r["distance_m"] is not None:
+        m.distance = r["distance_m"]
+    return m
+
+
+def _add_records(b: FitFileBuilder, rows) -> float:
+    """Add the records, with timer stop/start events around gaps longer than ``GAP_S``.
+
+    Args:
+        b (FitFileBuilder): Builder to add the messages to.
+        rows (list[sqlite3.Row]): Unpaused samples, in time order.
+
+    Returns:
+        float: Total timer time in seconds (gaps excluded).
+    """
+    b.add(_timer_event(rows[0]["t"], EventType.START))
+    timer_s, prev = 0.0, None
+    for r in rows:
+        if prev is not None:
+            gap = r["t"] - prev
+            if gap > GAP_S:
+                b.add(_timer_event(prev, EventType.STOP_ALL))
+                b.add(_timer_event(r["t"], EventType.START))
+            else:
+                timer_s += gap
+        b.add(_record(r))
+        prev = r["t"]
+    b.add(_timer_event(rows[-1]["t"], EventType.STOP_ALL))
+    return timer_s
+
+
+def _laps(rows) -> list[LapMessage]:
+    """Build one lap message per recorded lap number (workout step or manual lap).
+
+    Args:
+        rows (list[sqlite3.Row]): Unpaused samples, in time order.
+
+    Returns:
+        list[LapMessage]: Lap messages, ordered by lap number.
+    """
+    laps: dict[int, list] = {}
+    for r in rows:
+        laps.setdefault(r["lap"], []).append(r)
+    out = []
+    for i, (_, lr) in enumerate(sorted(laps.items())):
+        lap = LapMessage()
+        lap.message_index = i
+        lap.event = Event.LAP
+        lap.event_type = EventType.STOP
+        lap.lap_trigger = LapTrigger.MANUAL
+        lt = sum(min(b["t"] - a["t"], GAP_S) for a, b in pairwise(lr)) + 1
+        _fill_summary(lap, lr, lr[0]["t"], lr[-1]["t"], lt)
+        out.append(lap)
+    return out
+
+
+def _session(rows, timer_s: float, num_laps: int) -> SessionMessage:
+    """Build the session message.
+
+    Args:
+        rows (list[sqlite3.Row]): Unpaused samples, in time order.
+        timer_s (float): Total timer time in seconds.
+        num_laps (int): Number of laps in the session.
+
+    Returns:
+        SessionMessage: The session summary.
+    """
+    sess = SessionMessage()
+    sess.message_index = 0
+    sess.event = Event.SESSION
+    sess.event_type = EventType.STOP
+    sess.trigger = SessionTrigger.ACTIVITY_END
+    sess.first_lap_index = 0
+    sess.num_laps = num_laps
+    _fill_summary(sess, rows, rows[0]["t"], rows[-1]["t"], timer_s)
+    return sess
+
+
+def _activity(end: float, timer_s: float) -> ActivityMessage:
+    """Build the activity message.
+
+    Args:
+        end (float): Unix end time of the session.
+        timer_s (float): Total timer time in seconds.
+
+    Returns:
+        ActivityMessage: The activity message.
+    """
+    act = ActivityMessage()
+    act.timestamp = _ms(end)
+    act.total_timer_time = timer_s
+    act.num_sessions = 1
+    act.type = Activity.MANUAL
+    act.event = Event.ACTIVITY
+    act.event_type = EventType.STOP
+    return act
+
+
 def export_fit(rec: Recorder, out_path: Path) -> Path:
     """Export a recorded session to a FIT activity file.
 
@@ -132,88 +284,15 @@ def export_fit(rec: Recorder, out_path: Path) -> Path:
     rows = [r for r in rec.samples() if not r["paused"]]
     if not rows:
         raise ValueError("session has no samples")
-    start, end = rows[0]["t"], rows[-1]["t"]
 
     b = FitFileBuilder(auto_define=True, min_string_size=50)
-    fid = FileIdMessage()
-    fid.type = FileType.ACTIVITY
-    fid.manufacturer = Manufacturer.DEVELOPMENT.value
-    fid.product = 0
-    fid.serial_number = 0x5354524E
-    fid.time_created = _ms(start)
-    b.add(fid)
-
-    def event(t: float, et: EventType) -> None:
-        """Add a timer event message.
-
-        Args:
-            t (float): Unix time of the event.
-            et (EventType): Event type (start or stop).
-        """
-        e = EventMessage()
-        e.event = Event.TIMER
-        e.event_type = et
-        e.timestamp = _ms(t)
-        b.add(e)
-
-    event(start, EventType.START)
-    timer_s, prev = 0.0, None
-    for r in rows:
-        if prev is not None:
-            gap = r["t"] - prev
-            if gap > GAP_S:
-                event(prev, EventType.STOP_ALL)
-                event(r["t"], EventType.START)
-            else:
-                timer_s += gap
-        m = RecordMessage()
-        m.timestamp = _ms(r["t"])
-        if r["power"] is not None:
-            m.power = round(r["power"])
-        if r["hr"] is not None:
-            m.heart_rate = int(r["hr"])
-        if r["cadence"] is not None:
-            m.cadence = round(r["cadence"])
-        if r["speed_kmh"] is not None:
-            m.speed = r["speed_kmh"] / 3.6
-        if r["distance_m"] is not None:
-            m.distance = r["distance_m"]
-        b.add(m)
-        prev = r["t"]
-    event(end, EventType.STOP_ALL)
-
-    # Laps: one per recorded lap number (workout step or manual lap)
-    laps: dict[int, list] = {}
-    for r in rows:
-        laps.setdefault(r["lap"], []).append(r)
-    for i, (_, lr) in enumerate(sorted(laps.items())):
-        lap = LapMessage()
-        lap.message_index = i
-        lap.event = Event.LAP
-        lap.event_type = EventType.STOP
-        lap.lap_trigger = LapTrigger.MANUAL
-        lt = sum(min(b2["t"] - a["t"], GAP_S) for a, b2 in pairwise(lr)) + 1
-        _fill_summary(lap, lr, lr[0]["t"], lr[-1]["t"], lt)
+    b.add(_file_id(rows[0]["t"]))
+    timer_s = _add_records(b, rows)
+    laps = _laps(rows)
+    for lap in laps:
         b.add(lap)
-
-    sess = SessionMessage()
-    sess.message_index = 0
-    sess.event = Event.SESSION
-    sess.event_type = EventType.STOP
-    sess.trigger = SessionTrigger.ACTIVITY_END
-    sess.first_lap_index = 0
-    sess.num_laps = len(laps)
-    _fill_summary(sess, rows, start, end, timer_s)
-    b.add(sess)
-
-    act = ActivityMessage()
-    act.timestamp = _ms(end)
-    act.total_timer_time = timer_s
-    act.num_sessions = 1
-    act.type = Activity.MANUAL
-    act.event = Event.ACTIVITY
-    act.event_type = EventType.STOP
-    b.add(act)
+    b.add(_session(rows, timer_s, len(laps)))
+    b.add(_activity(rows[-1]["t"], timer_s))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     b.build().to_file(str(out_path))

@@ -50,7 +50,7 @@ def _int_list(values) -> list[int]:
 
 def _pos_int(value) -> int | None:
     """Convert a JSON number to a positive int, else ``None``."""
-    return int(round(value)) if isinstance(value, int | float) and value > 0 else None
+    return round(value) if isinstance(value, int | float) and value > 0 else None
 
 
 def parse_profile(athlete: dict) -> AthleteProfile:
@@ -144,9 +144,9 @@ class IntervalsClient:
             httpx.Response: The successful response.
         """
         r = await self._client.request(method, url, **kw)
-        if r.status_code == 401 or r.status_code == 403:
+        if r.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}:
             raise IntervalsError("intervals.icu rejected the API key")
-        if r.status_code >= 400:
+        if r.is_error:
             raise IntervalsError(f"intervals.icu error {r.status_code}: {r.text[:200]}")
         return r
 
