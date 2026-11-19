@@ -118,7 +118,7 @@ class Engine:
             return ride.active
 
         sync = SyncService(settings, messages, connections or (lambda: []), ride_active)
-        store = SessionStore(sessions or sessions_dir(), settings, sync, messages)
+        store = SessionStore(sessions or sessions_dir(), sync, messages)
         calibration = CalibrationService(devices, controller, messages, ride_active)
         ride = Ride(settings, controller, store, messages, tick_s, blocker=calibration.ride_blocker)
         return cls(

@@ -98,3 +98,31 @@ async def test_context_manager_runs_and_stops_the_loop(tmp_path):
         assert task is not None and not task.done()
     assert calls >= 3
     assert task.cancelled() and engine._task is None
+
+
+async def test_workout_complete_announced_once(tmp_path):
+    async with _engine(tmp_path) as (e, trainer, world):
+        e.ride.start(Workout("T", [Step(3, 1.0)]))
+        e.messages.append("Calibration complete")  # must not suppress the announcement
+        await _ride(e, 8, 1_700_000_000)
+        assert sum("Workout complete" in m for m in e.messages) == 1
+
+
+async def test_finish_resets_ride_when_finalize_fails(tmp_path, monkeypatch):
+    async with _engine(tmp_path) as (e, trainer, world):
+        e.ride.start(Workout("T", [Step(60, 1.0)]))
+        await _ride(e, 2, 1_700_000_000)
+
+        async def boom(rec, upload=None):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(e.store, "finalize", boom)
+        try:
+            await e.ride.finish()
+        except OSError:
+            pass
+        else:
+            raise AssertionError("finish() should propagate the failure")
+        assert e.ride.state == RideState.IDLE
+        assert e.ride.recorder is None and e.ride.runner is None
+        assert e.controller.mode == Mode.RESISTANCE

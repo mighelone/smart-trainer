@@ -6,7 +6,6 @@ import logging
 from collections import deque
 from pathlib import Path
 
-from smart_trainer.config import Settings
 from smart_trainer.core.recorder import Recorder, SessionInfo, find_unfinished
 from smart_trainer.core.workout import Workout
 from smart_trainer.export.fit import export_fit
@@ -23,33 +22,30 @@ class SessionStore:
         directory (Path): Directory where sessions are recorded.
     """
 
-    def __init__(
-        self, directory: Path, settings: Settings, sync: SyncService, messages: deque[str]
-    ) -> None:
+    def __init__(self, directory: Path, sync: SyncService, messages: deque[str]) -> None:
         """Initialize the store.
 
         Args:
             directory (Path): Directory where sessions are recorded.
-            settings (Settings): User settings (FTP, ``auto_upload``).
             sync (SyncService): Uploads finished sessions.
             messages (deque[str]): User-facing status messages.
         """
         self.directory = directory
-        self._settings = settings
         self._sync = sync
         self._messages = messages
 
-    def create(self, name: str, workout: Workout | None) -> Recorder:
+    def create(self, name: str, workout: Workout | None, ftp: int) -> Recorder:
         """Create a new session file.
 
         Args:
             name (str): Session name.
             workout (Workout | None): Workout being ridden, if any.
+            ftp (int): FTP in watts the session is ridden at.
 
         Returns:
             Recorder: Recorder for the new session.
         """
-        return Recorder.create(self.directory, name, self._settings.ftp, workout)
+        return Recorder.create(self.directory, name, ftp, workout)
 
     def open(self, info: SessionInfo) -> Recorder:
         """Open an existing session file.

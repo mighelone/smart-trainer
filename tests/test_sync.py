@@ -58,7 +58,7 @@ def _store(tmp_path, conns, readonly=False, **settings):
         c.settings = st
     messages: deque[str] = deque()
     sync = SyncService(st, messages, lambda: list(conns), ride_active=lambda: False)
-    return SessionStore(tmp_path, st, sync, messages), messages
+    return SessionStore(tmp_path, sync, messages), messages
 
 
 def _recorded(store: SessionStore, name="Test ride", now=1_700_000_000) -> Recorder:
@@ -109,14 +109,14 @@ async def test_retry_skips_connections_already_done(tmp_path):
 async def test_auto_upload_targets(tmp_path):
     good, flaky, _ = _conns()
     store, _ = _store(tmp_path, [good, flaky])
-    store._settings.connection("flaky").auto_upload = False
+    good.settings.connection("flaky").auto_upload = False
     assert store._sync.auto_upload_targets() == ["good"]
     rec = _recorded(store)
     await store.finalize(rec)  # automatic: only "good"
     assert set(read_info(rec.path).uploads) == {"good"}
     rec.close()
 
-    store._settings.auto_upload = False
+    good.settings.auto_upload = False
     assert store._sync.auto_upload_targets() == []
     rec = _recorded(store, "Ride 2", now=1_700_100_000)
     await store.finalize(rec)
@@ -129,7 +129,7 @@ async def test_auto_upload_targets(tmp_path):
 async def test_disabled_connection_is_skipped(tmp_path):
     good, flaky, _ = _conns()
     store, _ = _store(tmp_path, [good, flaky])
-    store._settings.connection("flaky").enabled = False
+    good.settings.connection("flaky").enabled = False
     rec = _recorded(store)
     await store.finalize(rec)
     assert set(read_info(rec.path).uploads) == {"good"}
