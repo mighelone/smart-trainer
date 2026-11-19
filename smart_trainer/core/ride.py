@@ -15,11 +15,12 @@ from smart_trainer.core.history import History, HistoryPoint
 from smart_trainer.core.recorder import Recorder, SessionInfo
 from smart_trainer.core.sessions import SessionStore
 from smart_trainer.core.state import Snapshot
-from smart_trainer.core.workout import Workout, WorkoutRunner
+from smart_trainer.core.workout import Step, Workout, WorkoutRunner
 
 AUTO_PAUSE_CADENCE = 20
 AUTO_PAUSE_POWER = 25
 INTENSITY_RANGE = (0.5, 1.5)
+CUE_LEAD_S = 5.0  # a step change is announced this many seconds before it happens
 MAX_TICK_DT_S = 5.0  # a longer gap between ticks (stall, sleep, crash) counts as this much
 
 
@@ -29,6 +30,24 @@ class RideState(StrEnum):
     IDLE = "idle"
     RIDING = "riding"
     FINISHING = "finishing"
+
+
+@dataclass(frozen=True)
+class StepCue:
+    """Announcement that the workout moves to the next step shortly.
+
+    Attributes:
+        seq (int): Increases with every cue of the ride, so a viewer can tell new
+            cues from one it has already played.
+        step_index (int): Index of the step that is ending.
+        next_step (Step): The step that follows.
+        in_s (float): Seconds left before the change when announced.
+    """
+
+    seq: int
+    step_index: int
+    next_step: Step
+    in_s: float
 
 
 def _no_blocker() -> str | None:
@@ -62,6 +81,7 @@ class Ride:
         erg_enabled (bool): Whether workout targets drive ERG mode.
         seconds (float): Recorded seconds, excluding pauses.
         history (History): Points for the live chart.
+        cue (StepCue | None): The latest step change announcement, if any.
     """
 
     settings: Settings = field(repr=False)
@@ -78,6 +98,8 @@ class Ride:
     erg_enabled: bool = field(default=True, init=False)
     seconds: float = field(default=0.0, init=False)
     history: History = field(default_factory=History, init=False, repr=False)
+    cue: StepCue | None = field(default=None, init=False)
+    _cued_step: int | None = field(default=None, init=False, repr=False)
     _last_step: int | None = field(default=None, init=False, repr=False)
     _completed_announced: bool = field(default=False, init=False, repr=False)
 
@@ -156,6 +178,7 @@ class Ride:
         self.state = RideState.RIDING
         self.manual_pause = False
         self._completed_announced = False
+        self._cued_step = None
         self._last_step = self.runner.step_index() if self.runner else None
         if self.runner is None:
             self.controller.set_mode(Mode.RESISTANCE)
@@ -250,10 +273,28 @@ class Ride:
         if self._last_step is not None and idx != self._last_step and self.recorder:
             self.recorder.new_lap()
         self._last_step = idx
+        self._announce_step_change(paused)
         if self.runner.finished and target is None and not self._completed_announced:
             self._completed_announced = True
             self.messages.append("Workout complete! Keep riding or press Finish.")
         return target
+
+    def _announce_step_change(self, paused: bool) -> None:
+        """Raise a :class:`StepCue` once per step, ``CUE_LEAD_S`` before the next one.
+
+        Args:
+            paused (bool): Whether the ride is paused (nothing is announced then).
+        """
+        runner = self.runner
+        if runner is None or paused or runner.finished:
+            return
+        i, _, _, left = runner.current()
+        nxt = runner.next_step()
+        if nxt is None or left > CUE_LEAD_S or self._cued_step == i:
+            return
+        self._cued_step = i
+        seq = self.cue.seq + 1 if self.cue else 1
+        self.cue = StepCue(seq, i, nxt, left)
 
     def _update_control_mode(self, target: float | None) -> None:
         """Switch between ERG and resistance mode according to the workout target.

@@ -10,7 +10,15 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Added
+- **Interval cues:** 5 seconds before each workout step change, the app beeps twice and shows
+  what comes next (e.g. "In 5 s · Sprint · 400 W for 00:30"), in the full app and in the mini
+  overlay, so you can follow the workout while watching a video. Turn it off, or test the sound,
+  in **Settings → Ride**. Browsers only play sound after you've clicked in the page (pressing
+  **Start** is enough).
+
 ### Changed
+- The "Next" line of a workout shows the target with the current intensity applied.
 - Rides record the **mean power of each second** instead of the last power reading in it. Power
   meters send 1–4 readings a second, so FIT files (and the live chart) are smoother and closer to
   the work actually done, which also makes NP more accurate.

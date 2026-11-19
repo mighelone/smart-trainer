@@ -186,3 +186,64 @@ async def test_device_chip_follows_the_device_state(user: User, engine):
     await user.should_see(f"trainer: {trainer.name} (connected)", retries=20)
     trainer.state = ConnState.DISCONNECTED
     await user.should_see(f"trainer: {trainer.name} (disconnected)", retries=40)
+
+
+def _record_scripts(user: User, monkeypatch) -> list[str]:
+    assert user.client is not None
+    scripts: list[str] = []
+    real = user.client.run_javascript
+
+    def run_javascript(code, **kwargs):
+        scripts.append(code)
+        return real(code, **kwargs)
+
+    monkeypatch.setattr(user.client, "run_javascript", run_javascript)
+    return scripts
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_interval_cue_beeps_and_shows_the_next_step(
+    user: User, engine, pages, monkeypatch, enabled
+):
+    from smart_trainer.core.workout import Step, Workout
+
+    pages.S.settings.interval_cues = enabled
+    pages.S.selected = Workout("Cue", [Step(6, 0.75), Step(6, 1.0, text="Push")])
+    await user.open("/")
+    scripts = _record_scripts(user, monkeypatch)
+    user.find("Start").click()
+    for _ in range(40):  # the first tick leaves 5 s in the first step: the cue
+        await asyncio.sleep(0.1)
+        if engine.ride.cue:
+            break
+    assert engine.ride.cue is not None
+    await asyncio.sleep(0.6)  # the page refreshes twice a second
+    beeps = [s for s in scripts if "smartTrainerBeep" in s]
+    if enabled:
+        assert beeps == ["window.smartTrainerBeep?.(2)"]
+        await user.should_see("Push · 200 W for 00:06")
+    else:
+        assert beeps == []
+        assert not user.notify.contains("Push")
+
+
+async def test_opening_a_page_does_not_replay_an_old_cue(user: User, engine, pages, monkeypatch):
+    from smart_trainer.core.workout import Step, Workout
+
+    engine.ride.start(Workout("Cue", [Step(6, 0.75), Step(6, 1.0)]))
+    for _ in range(40):
+        await asyncio.sleep(0.1)
+        if engine.ride.cue:
+            break
+    assert engine.ride.cue is not None
+    await user.open("/mini")
+    scripts = _record_scripts(user, monkeypatch)
+    await asyncio.sleep(1.0)
+    assert not [s for s in scripts if "smartTrainerBeep" in s]
+
+
+async def test_settings_switch_turns_cues_off(user: User, engine, pages):
+    pages.S.settings.interval_cues = True
+    await user.open("/settings")
+    user.find(marker="interval-cues").click()
+    assert pages.S.settings.model_dump()["interval_cues"] is False
