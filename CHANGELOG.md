@@ -16,6 +16,11 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   overlay, so you can follow the workout while watching a video. Turn it off, or test the sound,
   in **Settings → Ride**. Browsers only play sound after you've clicked in the page (pressing
   **Start** is enough).
+- **Cadence targets** from intervals.icu and `.zwo` workouts are shown in the step title
+  ("High Cadence · 100 rpm"), the "Next" line and the interval cue ("… @ 100 rpm"). When you ride
+  more than 10 rpm off the target for 5 seconds, the cadence tile turns amber with a LOW or HIGH
+  badge and a "speed up"/"ease off" hint, and the status line (also on the mini overlay) shows
+  "Cadence low: 78 / 100 rpm".
 
 ### Changed
 - The "Next" line of a workout shows the target with the current intensity applied.

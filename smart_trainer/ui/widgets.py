@@ -482,12 +482,51 @@ def next_step_text(step: Step, ftp: int, intensity: float = 1.0) -> str:
         intensity (float): Workout intensity multiplier.
 
     Returns:
-        str: E.g. ``"Sprint · 400 W for 00:30"`` or ``"Free ride for 05:00"``.
+        str: E.g. ``"Sprint · 400 W for 00:30 @ 110 rpm"`` or ``"Free ride for 05:00"``.
     """
     prefix = f"{step.text} · " if step.text else ""
     target = step.target_w(0, ftp)
     what = "Free ride" if target is None else f"{fmt(target * intensity)} W"
-    return f"{prefix}{what} for {fmt_time(step.duration_s)}"
+    cadence = f" @ {step.cadence} rpm" if step.cadence else ""
+    return f"{prefix}{what} for {fmt_time(step.duration_s)}{cadence}"
+
+
+def step_title(index: int, step: Step) -> str:
+    """Title of the current step: its cue text (or a generic name) and cadence target.
+
+    Args:
+        index (int): Index of the step in the workout.
+        step (Step): The step.
+
+    Returns:
+        str: E.g. ``"High Cadence · 100 rpm"`` or ``"Interval 3"``.
+    """
+    title = step.text or ("Free ride" if step.free_ride else f"Interval {index + 1}")
+    return f"{title} · {step.cadence} rpm" if step.cadence else title
+
+
+CADENCE_ALERT_COLOR = "#f59e0b"  # amber, like a device that's still connecting
+CADENCE_ALERT = {"low": ("LOW", "speed up"), "high": ("HIGH", "ease off")}
+
+
+def cadence_display(target: int | None, alert: str | None) -> tuple[str, str | None, str | None]:
+    """What the cadence tile shows besides the cadence itself.
+
+    Args:
+        target (int | None): The step's cadence target in rpm, if any.
+        alert (str | None): ``"low"``, ``"high"`` or ``None`` (see ``Ride.cadence_alert``).
+
+    Returns:
+        tuple[str, str | None, str | None]: The sub-line, and the accent color and
+        badge for ``Tile.set_zone`` (``None`` when on target: the tile's default).
+    """
+    if target is None:
+        return "", None, None
+    sub = f"target {target} rpm"
+    if alert not in CADENCE_ALERT:
+        return sub, None, None
+    badge, hint = CADENCE_ALERT[alert]
+    return f"{sub} · {hint}", CADENCE_ALERT_COLOR, badge
 
 
 class CuePlayer:

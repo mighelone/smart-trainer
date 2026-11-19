@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from smart_trainer.config import Settings
 from smart_trainer.core.control import Mode, TrainerController
@@ -21,6 +22,8 @@ AUTO_PAUSE_CADENCE = 20
 AUTO_PAUSE_POWER = 25
 INTENSITY_RANGE = (0.5, 1.5)
 CUE_LEAD_S = 5.0  # a step change is announced this many seconds before it happens
+CADENCE_TOLERANCE_RPM = 10  # off target by more than this is a cadence alert...
+CADENCE_WARN_AFTER_S = 5.0  # ...once it lasts this long (a short dip doesn't flash)
 MAX_TICK_DT_S = 5.0  # a longer gap between ticks (stall, sleep, crash) counts as this much
 
 
@@ -82,6 +85,9 @@ class Ride:
         seconds (float): Recorded seconds, excluding pauses.
         history (History): Points for the live chart.
         cue (StepCue | None): The latest step change announcement, if any.
+        cadence_alert (str | None): ``"low"`` or ``"high"`` while the rider has been
+            more than ``CADENCE_TOLERANCE_RPM`` off the step's cadence target for
+            ``CADENCE_WARN_AFTER_S``; ``None`` otherwise.
     """
 
     settings: Settings = field(repr=False)
@@ -99,7 +105,10 @@ class Ride:
     seconds: float = field(default=0.0, init=False)
     history: History = field(default_factory=History, init=False, repr=False)
     cue: StepCue | None = field(default=None, init=False)
+    cadence_alert: Literal["low", "high"] | None = field(default=None, init=False)
     _cued_step: int | None = field(default=None, init=False, repr=False)
+    _cadence_off_s: float = field(default=0.0, init=False, repr=False)
+    _cadence_step: int | None = field(default=None, init=False, repr=False)
     _last_step: int | None = field(default=None, init=False, repr=False)
     _completed_announced: bool = field(default=False, init=False, repr=False)
 
@@ -179,6 +188,7 @@ class Ride:
         self.manual_pause = False
         self._completed_announced = False
         self._cued_step = None
+        self._reset_cadence_check()
         self._last_step = self.runner.step_index() if self.runner else None
         if self.runner is None:
             self.controller.set_mode(Mode.RESISTANCE)
@@ -239,6 +249,7 @@ class Ride:
         self.auto_paused = not pedaling
         paused = self.manual_pause or self.auto_paused
         target = self._advance_workout(paused, dt)
+        self._check_cadence(snap.cadence, paused, dt)
         self._update_control_mode(target)
         if not paused:
             self.seconds += dt
@@ -295,6 +306,51 @@ class Ride:
         self._cued_step = i
         seq = self.cue.seq + 1 if self.cue else 1
         self.cue = StepCue(seq, i, nxt, left)
+
+    @property
+    def cadence_target(self) -> int | None:
+        """Cadence target of the current workout step.
+
+        Returns:
+            int | None: Target in rpm, or ``None`` without a workout, once it's
+            finished, or when the step has no cadence target.
+        """
+        runner = self.runner
+        if runner is None or runner.finished or not runner.workout.steps:
+            return None
+        return runner.current()[1].cadence
+
+    def _reset_cadence_check(self) -> None:
+        """Clear the cadence alert and the time spent off target."""
+        self.cadence_alert = None
+        self._cadence_off_s = 0.0
+
+    def _check_cadence(self, cadence: float | None, paused: bool, dt: float) -> None:
+        """Raise or clear the cadence alert for this tick.
+
+        Time off target only counts within one step: a new step starts with a clean
+        slate, so the rider has ``CADENCE_WARN_AFTER_S`` to adapt to its target.
+
+        Args:
+            cadence (float | None): Current cadence in rpm.
+            paused (bool): Whether the ride is paused (no alert then).
+            dt (float): Seconds since the previous tick.
+        """
+        target = self.cadence_target
+        step = self.runner.step_index() if self.runner else None
+        if step != self._cadence_step:
+            self._cadence_step = step
+            self._reset_cadence_check()
+        if paused or target is None or cadence is None:
+            self._reset_cadence_check()
+            return
+        off = cadence - target
+        if abs(off) <= CADENCE_TOLERANCE_RPM:
+            self._reset_cadence_check()
+            return
+        self._cadence_off_s += dt
+        if self._cadence_off_s >= CADENCE_WARN_AFTER_S:
+            self.cadence_alert = "low" if off < 0 else "high"
 
     def _update_control_mode(self, target: float | None) -> None:
         """Switch between ERG and resistance mode according to the workout target.
