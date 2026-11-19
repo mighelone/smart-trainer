@@ -457,7 +457,7 @@ class RidePage:
         self.holder.clear()
         with self.holder:
             self.chart = workout_chart(wo, self.ftp)
-        self.live = LiveChart(self.chart, e.ride, free_ride=wo is None)
+        self.live = LiveChart(self.chart, e.ride.history, free_ride=wo is None)
         self.chart_workout = wo
 
     def refresh(self) -> None:

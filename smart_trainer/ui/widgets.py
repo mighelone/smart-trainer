@@ -7,7 +7,7 @@ import json
 from nicegui import ui
 
 from smart_trainer.config import DEFAULT_POWER_ZONES
-from smart_trainer.core.ride import HISTORY_MAXLEN, HistoryPoint, Ride
+from smart_trainer.core.history import History, HistoryPoint
 from smart_trainer.core.workout import Workout, WorkoutRunner
 
 
@@ -351,39 +351,39 @@ def _power_hr(points: list[HistoryPoint]) -> tuple[list[list[float]], list[list[
 
 
 class LiveChart:
-    """Keeps the live power and heart-rate series of a workout chart in sync with a ride.
+    """Keeps the live power and heart-rate series of a workout chart in sync with a history.
 
-    The full history is sent once (when the chart is created or the ride restarts);
+    The full history is sent once (when the chart is created or the history restarts);
     after that each :meth:`sync` sends only the new points, so the traffic per refresh
     doesn't grow with the length of the ride.
 
     Attributes:
         chart (ui.echart): A chart made by :func:`workout_chart` with ``live=True``.
-        ride (Ride): The ride whose history is drawn.
+        history (History): The ride history drawn.
         free_ride (bool): Whether the chart follows a free ride (sliding time window).
     """
 
-    def __init__(self, chart: ui.echart, ride: Ride, free_ride: bool) -> None:
+    def __init__(self, chart: ui.echart, history: History, free_ride: bool) -> None:
         """Wrap a chart.
 
         Args:
             chart (ui.echart): The chart to keep in sync.
-            ride (Ride): The ride whose history is drawn.
+            history (History): The ride history to draw.
             free_ride (bool): Whether the chart follows a free ride.
         """
         self.chart = chart
-        self.ride = ride
+        self.history = history
         self.free_ride = free_ride
         self._gen: int | None = None
         self._seen = 0
 
     def sync(self) -> None:
-        """Bring the chart up to date with the ride history."""
-        ride = self.ride
-        new = None if self._gen is None else ride.history_since(self._gen, self._seen)
-        self._gen, self._seen = ride.history_gen, ride.history_total
+        """Bring the chart up to date with the history."""
+        h = self.history
+        new = None if self._gen is None else h.since(self._gen, self._seen)
+        self._gen, self._seen = h.gen, h.total
         if new is None:
-            self._redraw(list(ride.history))
+            self._redraw(list(h))
         elif new:
             self._append(new)
 
@@ -425,11 +425,11 @@ class LiveChart:
         for i, pts in ((1, power), (2, hr)):
             data = opts["series"][i]["data"]
             data += pts
-            del data[: max(0, len(data) - HISTORY_MAXLEN)]
+            del data[: max(0, len(data) - self.history.maxlen)]
         axis = self._axis(points[-1])
         if axis:
             opts["xAxis"].update(axis)
-        payload = {"power": power, "hr": hr, "max": HISTORY_MAXLEN, "axis": axis}
+        payload = {"power": power, "hr": hr, "max": self.history.maxlen, "axis": axis}
         self.chart.client.run_javascript(
             _APPEND_JS % {"id": self.chart.id, "data": json.dumps(payload)}
         )

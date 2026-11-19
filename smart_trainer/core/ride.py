@@ -11,6 +11,7 @@ from pathlib import Path
 
 from smart_trainer.config import Settings
 from smart_trainer.core.control import Mode, TrainerController
+from smart_trainer.core.history import History, HistoryPoint
 from smart_trainer.core.recorder import Recorder, SessionInfo
 from smart_trainer.core.sessions import SessionStore
 from smart_trainer.core.state import Snapshot
@@ -19,7 +20,6 @@ from smart_trainer.core.workout import Workout, WorkoutRunner
 AUTO_PAUSE_CADENCE = 20
 AUTO_PAUSE_POWER = 25
 INTENSITY_RANGE = (0.5, 1.5)
-HISTORY_MAXLEN = 3 * 3600  # chart points kept: 3 h at 1 Hz
 MAX_TICK_DT_S = 5.0  # a longer gap between ticks (stall, sleep, crash) counts as this much
 
 
@@ -29,26 +29,6 @@ class RideState(StrEnum):
     IDLE = "idle"
     RIDING = "riding"
     FINISHING = "finishing"
-
-
-@dataclass
-class HistoryPoint:
-    """One point of the live ride chart.
-
-    Attributes:
-        x (float): Position on the chart's time axis: workout elapsed seconds, or
-            active ride seconds in a free ride (what the session records as ``elapsed``).
-        power (float | None): Power in watts.
-        hr (int | None): Heart rate in bpm.
-        cadence (float | None): Cadence in rpm.
-        target (float | None): Workout target power in watts.
-    """
-
-    x: float
-    power: float | None
-    hr: int | None
-    cadence: float | None
-    target: float | None
 
 
 def _no_blocker() -> str | None:
@@ -81,12 +61,7 @@ class Ride:
         auto_paused (bool): Whether the ride is auto-paused (not pedalling).
         erg_enabled (bool): Whether workout targets drive ERG mode.
         seconds (float): Recorded seconds, excluding pauses.
-        history (deque[HistoryPoint]): Points for the live chart (the last
-            ``HISTORY_MAXLEN``).
-        history_gen (int): Changes whenever the history is restarted (new or resumed
-            ride), so a chart knows to redraw instead of appending.
-        history_total (int): Points appended since the history was restarted,
-            including those the deque has dropped.
+        history (History): Points for the live chart.
     """
 
     settings: Settings = field(repr=False)
@@ -102,11 +77,7 @@ class Ride:
     auto_paused: bool = field(default=False, init=False)
     erg_enabled: bool = field(default=True, init=False)
     seconds: float = field(default=0.0, init=False)
-    history: deque[HistoryPoint] = field(
-        default_factory=lambda: deque(maxlen=HISTORY_MAXLEN), init=False, repr=False
-    )
-    history_gen: int = field(default=0, init=False)
-    history_total: int = field(default=0, init=False)
+    history: History = field(default_factory=History, init=False, repr=False)
     _last_step: int | None = field(default=None, init=False, repr=False)
     _completed_announced: bool = field(default=False, init=False, repr=False)
 
@@ -135,7 +106,7 @@ class Ride:
         self.recorder = self.store.create(name, workout, ftp)
         self.runner = WorkoutRunner(workout, ftp) if workout and workout.steps else None
         self.seconds = 0.0
-        self._restart_history()
+        self.history.restart()
         self._begin("Ride started")
 
     def resume(self, info: SessionInfo) -> None:
@@ -154,14 +125,14 @@ class Ride:
             if info.workout and info.workout.steps
             else None
         )
-        self._restart_history()
+        self.history.restart()
         active, prev_t = 0.0, None
         for r in self.recorder.samples():  # restore the chart from what was recorded
             if not r["paused"]:  # same clamp as the live ticks; crash gaps don't count
                 gap = self.tick_s if prev_t is None else r["t"] - prev_t
                 active += min(max(gap, 0.0), MAX_TICK_DT_S)
             prev_t = r["t"]
-            self._add_history(
+            self.history.add(
                 HistoryPoint(r["elapsed"] or 0.0, r["power"], r["hr"], r["cadence"], r["target"])
             )
         self.seconds = active
@@ -258,40 +229,7 @@ class Ride:
                 now_wall,
             )
         x = self.runner.elapsed if self.runner else self.seconds
-        self._add_history(HistoryPoint(x, snap.power, snap.hr, snap.cadence, target))
-
-    # ------------------------------------------------------------------ history
-    def _restart_history(self) -> None:
-        """Empty the chart history and start a new generation of it."""
-        self.history.clear()
-        self.history_gen += 1
-        self.history_total = 0
-
-    def _add_history(self, point: HistoryPoint) -> None:
-        """Append a point to the chart history.
-
-        Args:
-            point (HistoryPoint): The new point.
-        """
-        self.history.append(point)
-        self.history_total += 1
-
-    def history_since(self, gen: int, seen: int) -> list[HistoryPoint] | None:
-        """The chart points a viewer hasn't got yet.
-
-        Args:
-            gen (int): The :attr:`history_gen` the viewer last synced with.
-            seen (int): The :attr:`history_total` the viewer last synced with.
-
-        Returns:
-            list[HistoryPoint] | None: The new points (oldest first, maybe empty), or
-            ``None`` when the viewer must redraw from :attr:`history` (the history
-            was restarted, or more points arrived than the deque still holds).
-        """
-        new = self.history_total - seen
-        if gen != self.history_gen or new < 0 or new > len(self.history):
-            return None
-        return [self.history[-i] for i in range(new, 0, -1)]  # O(1) access at the ends
+        self.history.add(HistoryPoint(x, snap.power, snap.hr, snap.cadence, target))
 
     def _advance_workout(self, paused: bool, dt: float) -> float | None:
         """Advance the workout, starting a lap on each new step.

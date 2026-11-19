@@ -3,7 +3,6 @@
 import json
 import shutil
 import subprocess
-from collections import deque
 from typing import cast
 
 import pytest
@@ -11,7 +10,7 @@ from nicegui import ui
 
 from smart_trainer.config import Settings
 from smart_trainer.core.engine import Engine
-from smart_trainer.core.ride import HistoryPoint
+from smart_trainer.core.history import History, HistoryPoint
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Step, Workout
 from smart_trainer.ui import widgets
@@ -56,38 +55,16 @@ class FakeChart:
         return json.loads(code[code.index("const d = ") + 10 : code.index(";\n  const series")])
 
 
-def _live(chart: FakeChart, ride, free_ride: bool) -> LiveChart:
-    return LiveChart(cast(ui.echart, chart), ride, free_ride=free_ride)
+def _live(chart: FakeChart, history: History, free_ride: bool) -> LiveChart:
+    return LiveChart(cast(ui.echart, chart), history, free_ride=free_ride)
 
 
-# ------------------------------------------------------------------- Ride.history_since
-def test_history_since_returns_only_new_points(ride):
-    ride.start(None)
-    _ticks(ride, 3)
-    gen = ride.history_gen
-    assert [p.x for p in ride.history_since(gen, 0)] == [1, 2, 3]
-    _ticks(ride, 2, start=3)
-    assert [p.x for p in ride.history_since(gen, 3)] == [4, 5]
-    assert ride.history_since(gen, 5) == []
+def _add(history: History, xs, power=200.0, hr=140):
+    for x in xs:
+        history.add(HistoryPoint(x, power, hr, 90.0, None))
 
 
-def test_history_since_asks_for_a_redraw_after_a_restart(ride):
-    ride.start(None)
-    _ticks(ride, 3)
-    gen = ride.history_gen
-    ride._restart_history()  # what a new or resumed ride does
-    assert ride.history_since(gen, 3) is None
-
-
-def test_history_since_asks_for_a_redraw_when_points_were_dropped(ride):
-    ride.start(None)
-    ride.history = deque(maxlen=3)
-    _ticks(ride, 5)
-    gen = ride.history_gen
-    assert ride.history_since(gen, 0) is None  # 5 new, only 3 kept
-    assert [p.x for p in ride.history_since(gen, 2)] == [3, 4, 5]
-
-
+# ----------------------------------------------------------------- Ride history
 def test_history_x_follows_the_workout_clock(ride):
     ride.start(Workout("T", [Step(60, 1.0), Step(60, 0.5)]))
     _ticks(ride, 2)
@@ -105,21 +82,21 @@ def test_resume_restores_history_on_the_recorded_clock(tmp_path):
     [info] = e2.ride.recoverable_sessions()
     e2.ride.resume(info)
     assert [p.x for p in e2.ride.history] == [1, 2, 3, 4]
-    assert e2.ride.history_total == 4
+    assert e2.ride.history.total == 4
     e2.ride.close()
 
 
 # ------------------------------------------------------------------------ LiveChart
-def test_live_chart_draws_once_then_appends(ride):
-    ride.start(Workout("T", [Step(600, 1.0)]))
-    _ticks(ride, 3)
+def test_live_chart_draws_once_then_appends():
+    h = History()
+    _add(h, [1, 2, 3])
     chart = FakeChart()
-    live = _live(chart, ride, False)
+    live = _live(chart, h, False)
     live.sync()
     assert chart.updates == 1 and not chart.scripts  # the whole history, once
     assert chart.options["series"][1]["data"] == [[1, 200], [2, 200], [3, 200]]
 
-    _ticks(ride, 2, start=3)
+    _add(h, [4, 5])
     live.sync()
     assert chart.updates == 1  # no full update any more
     assert chart.sent()["power"] == [[4, 200], [5, 200]]  # only the new points
@@ -130,30 +107,30 @@ def test_live_chart_draws_once_then_appends(ride):
     assert len(chart.scripts) == 1  # nothing new: nothing sent
 
 
-def test_live_chart_redraws_when_the_ride_restarts(ride):
-    ride.start(None)
-    _ticks(ride, 3)
+def test_live_chart_redraws_when_the_history_restarts():
+    h = History()
+    _add(h, [1, 2, 3])
     chart = FakeChart()
-    live = _live(chart, ride, True)
+    live = _live(chart, h, True)
     live.sync()
-    ride._restart_history()  # what a new or resumed ride does
-    ride.seconds = 0
-    _ticks(ride, 1)
+    h.restart()  # a new or resumed ride
+    _add(h, [1])
     live.sync()
     assert chart.updates == 2 and chart.options["series"][1]["data"] == [[1, 200]]
 
 
-def test_live_chart_free_ride_window_and_trim(ride, monkeypatch):
-    monkeypatch.setattr(widgets, "HISTORY_MAXLEN", 4)
-    ride.start(None)
+def test_live_chart_free_ride_window_and_trim():
+    h = History(maxlen=4)
     chart = FakeChart()
-    live = _live(chart, ride, True)
+    live = _live(chart, h, True)
     live.sync()
     assert chart.options["xAxis"] == {"min": 0, "max": 600}
-    ride.seconds = 1500  # well into the ride
-    _ticks(ride, 6)
+    _add(h, [1501, 1502, 1503])  # well into the ride
+    live.sync()
+    _add(h, [1504, 1505, 1506])
     live.sync()
     assert chart.sent()["axis"] == {"min": 306, "max": 1506}  # the last 20 minutes
+    assert chart.sent()["max"] == 4
     assert [x for x, _ in chart.options["series"][1]["data"]] == [1503, 1504, 1505, 1506]
 
 
@@ -175,15 +152,14 @@ console.log(JSON.stringify({options: el.options, calls}));
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js to run the script")
-def test_append_script_in_javascript(ride):
-    ride.start(None)
+def test_append_script_in_javascript():
+    h = History(maxlen=3)
     chart = FakeChart()
-    live = _live(chart, ride, True)
+    live = _live(chart, h, True)
     live.sync()
-    _ticks(ride, 2)
+    _add(h, [1, 2])
     live.sync()
-    widgets_max = widgets.HISTORY_MAXLEN
-    script = chart.scripts[-1].replace(f'"max": {widgets_max}', '"max": 3')  # trim to 3
+    script = chart.scripts[-1]
     out = subprocess.run(
         ["node", "-e", NODE_HARNESS % script], capture_output=True, text=True, check=True
     )
