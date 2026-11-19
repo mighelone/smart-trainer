@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -19,6 +19,7 @@ from smart_trainer.core.workout import Workout, WorkoutRunner
 AUTO_PAUSE_CADENCE = 20
 AUTO_PAUSE_POWER = 25
 INTENSITY_RANGE = (0.5, 1.5)
+HISTORY_MAXLEN = 3 * 3600  # chart points kept: 3 h at 1 Hz
 
 
 class RideState(StrEnum):
@@ -48,10 +49,29 @@ class HistoryPoint:
     target: float | None
 
 
+def _no_blocker() -> str | None:
+    """Default ride blocker: nothing prevents a ride from starting.
+
+    Returns:
+        str | None: Always ``None``.
+    """
+    return None
+
+
+@dataclass(eq=False)
 class Ride:
     """The current ride (free ride or workout) from start to finish.
 
+    Built idle; :meth:`start` or :meth:`resume` begins a ride.
+
     Attributes:
+        settings (Settings): User settings; FTP is read when a ride starts.
+        controller (TrainerController): Trainer control, switched ERG/resistance.
+        store (SessionStore): Creates and finalizes session files.
+        messages (deque[str]): User-facing status messages.
+        tick_s (float): Seconds per :meth:`tick`.
+        blocker (Callable[[], str | None]): Returns why a ride can't start now
+            (e.g. a calibration is running), or ``None``.
         state (RideState): Current ride state.
         runner (WorkoutRunner | None): Workout runner, if riding a workout.
         recorder (Recorder | None): Session recorder while riding.
@@ -62,41 +82,24 @@ class Ride:
         history (deque[HistoryPoint]): Points for the live chart.
     """
 
-    def __init__(
-        self,
-        settings: Settings,
-        controller: TrainerController,
-        store: SessionStore,
-        messages: deque[str],
-        tick_s: float,
-        blocker: Callable[[], str | None] = lambda: None,
-    ) -> None:
-        """Initialize an idle ride.
-
-        Args:
-            settings (Settings): User settings (FTP).
-            controller (TrainerController): Trainer control, switched ERG/resistance.
-            store (SessionStore): Creates and finalizes session files.
-            messages (deque[str]): User-facing status messages.
-            tick_s (float): Seconds per :meth:`tick`.
-            blocker (Callable[[], str | None]): Returns why a ride can't start now
-                (e.g. a calibration is running), or ``None``.
-        """
-        self._settings = settings
-        self._controller = controller
-        self._store = store
-        self._messages = messages
-        self._tick_s = tick_s
-        self._blocker = blocker
-        self.state = RideState.IDLE
-        self.runner: WorkoutRunner | None = None
-        self.recorder: Recorder | None = None
-        self.manual_pause = False
-        self.auto_paused = False
-        self.erg_enabled = True
-        self.seconds = 0.0
-        self.history: deque[HistoryPoint] = deque(maxlen=3 * 3600)
-        self._last_step: int | None = None
+    settings: Settings = field(repr=False)
+    controller: TrainerController = field(repr=False)
+    store: SessionStore = field(repr=False)
+    messages: deque[str] = field(repr=False)
+    tick_s: float
+    blocker: Callable[[], str | None] = field(default=_no_blocker, repr=False)
+    state: RideState = field(default=RideState.IDLE, init=False)
+    runner: WorkoutRunner | None = field(default=None, init=False)
+    recorder: Recorder | None = field(default=None, init=False)
+    manual_pause: bool = field(default=False, init=False)
+    auto_paused: bool = field(default=False, init=False)
+    erg_enabled: bool = field(default=True, init=False)
+    seconds: float = field(default=0.0, init=False)
+    history: deque[HistoryPoint] = field(
+        default_factory=lambda: deque(maxlen=HISTORY_MAXLEN), init=False, repr=False
+    )
+    _last_step: int | None = field(default=None, init=False, repr=False)
+    _completed_announced: bool = field(default=False, init=False, repr=False)
 
     @property
     def active(self) -> bool:
@@ -119,10 +122,9 @@ class Ride:
         """
         self._check_can_start()
         name = workout.name if workout else f"Free ride {datetime.now():%d %b}"
-        self.recorder = self._store.create(name, workout)
-        self.runner = (
-            WorkoutRunner(workout, self._settings.ftp) if workout and workout.steps else None
-        )
+        ftp = self.settings.ftp  # read once: the recorder and the runner must agree
+        self.recorder = self.store.create(name, workout, ftp)
+        self.runner = WorkoutRunner(workout, ftp) if workout and workout.steps else None
         self.seconds = 0.0
         self.history.clear()
         self._begin("Ride started")
@@ -137,7 +139,7 @@ class Ride:
             RuntimeError: If a ride can't start now (e.g. a calibration is running).
         """
         self._check_can_start()
-        self.recorder = self._store.open(info)
+        self.recorder = self.store.open(info)
         self.runner = (
             WorkoutRunner(info.workout, info.ftp, info.elapsed_s)
             if info.workout and info.workout.steps
@@ -147,7 +149,7 @@ class Ride:
         active = 0.0
         for r in self.recorder.samples():  # restore the chart from what was recorded
             if not r["paused"]:
-                active += self._tick_s
+                active += self.tick_s
             self.history.append(
                 HistoryPoint(active, r["power"], r["hr"], r["cadence"], r["target"])
             )
@@ -160,7 +162,7 @@ class Ride:
         Raises:
             RuntimeError: With the blocker's reason.
         """
-        if reason := self._blocker():
+        if reason := self.blocker():
             raise RuntimeError(reason)
 
     def _begin(self, message: str) -> None:
@@ -171,10 +173,11 @@ class Ride:
         """
         self.state = RideState.RIDING
         self.manual_pause = False
+        self._completed_announced = False
         self._last_step = self.runner.step_index() if self.runner else None
         if self.runner is None:
-            self._controller.set_mode(Mode.RESISTANCE)
-        self._messages.append(message)
+            self.controller.set_mode(Mode.RESISTANCE)
+        self.messages.append(message)
 
     async def finish(self, upload: bool | None = None) -> Path | None:
         """Stop recording, export FIT, and optionally upload.
@@ -190,12 +193,13 @@ class Ride:
             return None
         self.state = RideState.FINISHING
         rec = self.recorder
-        fit = await self._store.finalize(rec, upload)
-        rec.close()
-        self.recorder, self.runner = None, None
-        self.state = RideState.IDLE
-        self._controller.set_mode(Mode.RESISTANCE)
-        return fit
+        try:
+            return await self.store.finalize(rec, upload)
+        finally:  # even if finalizing fails, don't leave the ride stuck in FINISHING
+            rec.close()
+            self.recorder, self.runner = None, None
+            self.state = RideState.IDLE
+            self.controller.set_mode(Mode.RESISTANCE)
 
     def close(self) -> None:
         """Close the recorder without finishing: the session stays recoverable."""
@@ -208,7 +212,7 @@ class Ride:
         Returns:
             list[SessionInfo]: Sessions still marked ``active``.
         """
-        return self._store.unfinished(exclude=self.recorder.path if self.recorder else None)
+        return self.store.unfinished(exclude=self.recorder.path if self.recorder else None)
 
     # --------------------------------------------------------------------- tick
     def tick(self, snap: Snapshot, now_wall: float) -> None:
@@ -230,14 +234,14 @@ class Ride:
         target = self._advance_workout(paused)
         self._update_control_mode(target)
         if not paused:
-            self.seconds += self._tick_s
+            self.seconds += self.tick_s
         if self.recorder:
             self.recorder.record(
                 snap,
                 self.runner.elapsed if self.runner else self.seconds,
                 target,
                 paused,
-                self._controller.mode.value,
+                self.controller.mode.value,
                 now_wall,
             )
         self.history.append(HistoryPoint(self.seconds, snap.power, snap.hr, snap.cadence, target))
@@ -254,14 +258,15 @@ class Ride:
         if self.runner is None:
             return None
         self.runner.paused = paused
-        self.runner.advance(self._tick_s)
+        self.runner.advance(self.tick_s)
         target = self.runner.target_w()
         idx = self.runner.step_index()
         if self._last_step is not None and idx != self._last_step and self.recorder:
             self.recorder.new_lap()
         self._last_step = idx
-        if self.runner.finished and target is None and "complete" not in "".join(self._messages):
-            self._messages.append("Workout complete! Keep riding or press Finish.")
+        if self.runner.finished and target is None and not self._completed_announced:
+            self._completed_announced = True
+            self.messages.append("Workout complete! Keep riding or press Finish.")
         return target
 
     def _update_control_mode(self, target: float | None) -> None:
@@ -273,10 +278,10 @@ class Ride:
         if self.runner is None:
             return
         if target is not None and self.erg_enabled:
-            self._controller.erg_target = target
-            self._controller.set_mode(Mode.ERG)
-        elif self._controller.mode == Mode.ERG:
-            self._controller.set_mode(Mode.RESISTANCE)
+            self.controller.erg_target = target
+            self.controller.set_mode(Mode.ERG)
+        elif self.controller.mode == Mode.ERG:
+            self.controller.set_mode(Mode.RESISTANCE)
 
     # ----------------------------------------------------------------- controls
     def current_target(self) -> float | None:
@@ -318,5 +323,5 @@ class Ride:
             enabled (bool): Whether workout targets should drive ERG mode.
         """
         self.erg_enabled = enabled
-        if not enabled and self._controller.mode == Mode.ERG:
-            self._controller.set_mode(Mode.RESISTANCE)
+        if not enabled and self.controller.mode == Mode.ERG:
+            self.controller.set_mode(Mode.RESISTANCE)
