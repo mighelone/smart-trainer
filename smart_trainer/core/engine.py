@@ -32,7 +32,7 @@ from smart_trainer.config import Settings, sessions_dir
 from smart_trainer.core.calibration import CalibrationService
 from smart_trainer.core.control import TrainerController
 from smart_trainer.core.devices import DeviceHub
-from smart_trainer.core.ride import Ride
+from smart_trainer.core.ride import MAX_TICK_DT_S, Ride
 from smart_trainer.core.sessions import SessionStore
 from smart_trainer.core.sources import SourceSelector
 from smart_trainer.core.state import Snapshot
@@ -76,6 +76,7 @@ class Engine:
     run_loop: bool = True
     snapshot: Snapshot = field(default_factory=Snapshot, init=False)
     _task: asyncio.Task | None = field(default=None, init=False, repr=False)
+    _last_tick_mono: float | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def from_settings(
@@ -192,16 +193,40 @@ class Engine:
                 )
             await asyncio.sleep(max(0.0, delay))
 
-    async def tick(self, now_wall: float | None = None) -> None:
+    async def tick(self, now_wall: float | None = None, now_mono: float | None = None) -> None:
         """Run one engine step: snapshot, ride progress, then trainer control.
 
+        The ride advances by the monotonic time since the previous tick (clamped to
+        ``0..MAX_TICK_DT_S``), so a late tick doesn't make the workout clock drift.
+
         Args:
-            now_wall (float | None): Current unix time; defaults to ``time.time()``.
+            now_wall (float | None): Current unix time, used for recording;
+                defaults to ``time.time()``.
+            now_mono (float | None): Current monotonic time, used for timing (ride
+                progress, trainer command resend, power matching); defaults to
+                ``time.monotonic()``.
         """
-        now_wall = now_wall or time.time()
+        now_wall = now_wall if now_wall is not None else time.time()
+        now_mono = now_mono if now_mono is not None else time.monotonic()
+        dt = self._elapsed_since_last_tick(now_mono)
         assignment = self.devices.assignment
         snapshot = self.snapshot = self.selector.create_snapshot(assignment)
-        self.ride.tick(snapshot, now_wall)
+        self.ride.tick(snapshot, now_wall, dt)
         if self.calibration.suspends_control(assignment.trainer_id):
             return  # never send resistance commands while the trainer spins down
-        await self.controller.apply(snapshot, self.devices.trainer_connected(), now_wall)
+        await self.controller.apply(snapshot, self.devices.trainer_connected(), now_mono)
+
+    def _elapsed_since_last_tick(self, now_mono: float) -> float:
+        """Measure the time since the previous tick and remember this one.
+
+        Args:
+            now_mono (float): Current monotonic time.
+
+        Returns:
+            float: Seconds since the previous tick, clamped to ``0..MAX_TICK_DT_S``
+            (``tick_s`` on the first tick).
+        """
+        last, self._last_tick_mono = self._last_tick_mono, now_mono
+        if last is None:
+            return self.tick_s
+        return min(max(now_mono - last, 0.0), MAX_TICK_DT_S)

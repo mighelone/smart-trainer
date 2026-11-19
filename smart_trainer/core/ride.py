@@ -20,6 +20,7 @@ AUTO_PAUSE_CADENCE = 20
 AUTO_PAUSE_POWER = 25
 INTENSITY_RANGE = (0.5, 1.5)
 HISTORY_MAXLEN = 3 * 3600  # chart points kept: 3 h at 1 Hz
+MAX_TICK_DT_S = 5.0  # a longer gap between ticks (stall, sleep, crash) counts as this much
 
 
 class RideState(StrEnum):
@@ -146,10 +147,12 @@ class Ride:
             else None
         )
         self.history.clear()
-        active = 0.0
+        active, prev_t = 0.0, None
         for r in self.recorder.samples():  # restore the chart from what was recorded
-            if not r["paused"]:
-                active += self.tick_s
+            if not r["paused"]:  # same clamp as the live ticks; crash gaps don't count
+                gap = self.tick_s if prev_t is None else r["t"] - prev_t
+                active += min(max(gap, 0.0), MAX_TICK_DT_S)
+            prev_t = r["t"]
             self.history.append(
                 HistoryPoint(active, r["power"], r["hr"], r["cadence"], r["target"])
             )
@@ -215,7 +218,7 @@ class Ride:
         return self.store.unfinished(exclude=self.recorder.path if self.recorder else None)
 
     # --------------------------------------------------------------------- tick
-    def tick(self, snap: Snapshot, now_wall: float) -> None:
+    def tick(self, snap: Snapshot, now_wall: float, dt: float | None = None) -> None:
         """Advance the ride by one tick: pauses, workout, control mode, recording, chart.
 
         Does nothing unless riding.
@@ -223,18 +226,20 @@ class Ride:
         Args:
             snap (Snapshot): Latest effective metrics.
             now_wall (float): Current unix time.
+            dt (float | None): Seconds since the previous tick; defaults to ``tick_s``.
         """
         if self.state != RideState.RIDING:
             return
+        dt = self.tick_s if dt is None else dt
         pedaling = (snap.cadence or 0) >= AUTO_PAUSE_CADENCE or (
             snap.power or 0
         ) >= AUTO_PAUSE_POWER
         self.auto_paused = not pedaling
         paused = self.manual_pause or self.auto_paused
-        target = self._advance_workout(paused)
+        target = self._advance_workout(paused, dt)
         self._update_control_mode(target)
         if not paused:
-            self.seconds += self.tick_s
+            self.seconds += dt
         if self.recorder:
             self.recorder.record(
                 snap,
@@ -246,11 +251,12 @@ class Ride:
             )
         self.history.append(HistoryPoint(self.seconds, snap.power, snap.hr, snap.cadence, target))
 
-    def _advance_workout(self, paused: bool) -> float | None:
+    def _advance_workout(self, paused: bool, dt: float) -> float | None:
         """Advance the workout, starting a lap on each new step.
 
         Args:
             paused (bool): Whether the ride is paused (the workout clock stops).
+            dt (float): Seconds to advance the workout by.
 
         Returns:
             float | None: The current target in watts, or ``None``.
@@ -258,7 +264,7 @@ class Ride:
         if self.runner is None:
             return None
         self.runner.paused = paused
-        self.runner.advance(self.tick_s)
+        self.runner.advance(dt)
         target = self.runner.target_w()
         idx = self.runner.step_index()
         if self._last_step is not None and idx != self._last_step and self.recorder:
