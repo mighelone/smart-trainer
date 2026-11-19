@@ -12,7 +12,7 @@ from nicegui import app, native, ui
 
 from smart_trainer.ble import fake
 from smart_trainer.ble.scanner import make_device
-from smart_trainer.config import APP_DIR, Settings
+from smart_trainer.config import APP_DIR, Settings, setup_logging
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
 from smart_trainer.sync import registry
@@ -96,9 +96,8 @@ def run() -> None:
         args.native = True
         S.start_mini = True
         app.native.window_args["on_top"] = True
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    if log_file := setup_logging(to_file=args.native):
+        log.info("logging to %s", log_file)
 
     app.on_startup(lambda: _startup(args.fake))
     app.on_shutdown(_lifetime.aclose)

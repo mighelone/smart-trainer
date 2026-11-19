@@ -177,12 +177,20 @@ class Engine:
         """Run :meth:`tick` every ``tick_s`` seconds until cancelled."""
         next_t = time.monotonic()
         while True:
+            started = time.monotonic()
             try:
                 await self.tick()
             except Exception:
                 log.exception("engine tick failed")
             next_t += self.tick_s
-            await asyncio.sleep(max(0.0, next_t - time.monotonic()))
+            delay = next_t - time.monotonic()
+            if delay <= 0:
+                log.warning(
+                    "engine tick overran: took %.3f s, %.3f s behind schedule",
+                    time.monotonic() - started,
+                    -delay,
+                )
+            await asyncio.sleep(max(0.0, delay))
 
     async def tick(self, now_wall: float | None = None) -> None:
         """Run one engine step: snapshot, ride progress, then trainer control.
