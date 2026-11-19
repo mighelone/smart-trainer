@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+from contextlib import contextmanager
 from typing import cast
 
 import pytest
@@ -40,8 +41,16 @@ class FakeChart:
     def __init__(self):
         self.options = {"series": [{"data": []}, {"data": []}, {"data": []}], "xAxis": {}}
         self.updates = 0
+        self.suspended = 0  # changes made while updates were suspended
         self.scripts: list[str] = []
         self.client = self
+        self.props = self
+
+    @contextmanager
+    def suspend_updates(self):
+        before = json.dumps(self.options)
+        yield
+        self.suspended += json.dumps(self.options) != before
 
     def update(self):
         self.updates += 1
@@ -102,6 +111,7 @@ def test_live_chart_draws_once_then_appends():
     assert chart.sent()["power"] == [[4, 200], [5, 200]]  # only the new points
     assert chart.sent()["hr"] == [[4, 140], [5, 140]] and chart.sent()["axis"] is None
     assert len(chart.options["series"][1]["data"]) == 5  # the server copy stays complete
+    assert chart.suspended == 1  # ...changed without triggering a full update
 
     live.sync()
     assert len(chart.scripts) == 1  # nothing new: nothing sent

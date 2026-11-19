@@ -422,13 +422,16 @@ class LiveChart:
         """
         power, hr = _power_hr(points)
         opts = self.chart.options
-        for i, pts in ((1, power), (2, hr)):
-            data = opts["series"][i]["data"]
-            data += pts
-            del data[: max(0, len(data) - self.history.maxlen)]
         axis = self._axis(points[-1])
-        if axis:
-            opts["xAxis"].update(axis)
+        # The options are observed: without suspending, every change below would send
+        # the whole chart to the browser again, which is what this method avoids.
+        with self.chart.props.suspend_updates():
+            for i, pts in ((1, power), (2, hr)):
+                data = opts["series"][i]["data"]
+                data += pts
+                del data[: max(0, len(data) - self.history.maxlen)]
+            if axis:
+                opts["xAxis"].update(axis)
         payload = {"power": power, "hr": hr, "max": self.history.maxlen, "axis": axis}
         self.chart.client.run_javascript(
             _APPEND_JS % {"id": self.chart.id, "data": json.dumps(payload)}
