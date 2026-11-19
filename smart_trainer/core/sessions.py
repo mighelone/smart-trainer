@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import deque
 from pathlib import Path
 
-from smart_trainer.core.recorder import Recorder, SessionInfo, find_unfinished
+from smart_trainer.core.recorder import Recorder, SessionInfo, read_info
 from smart_trainer.core.workout import Workout
 from smart_trainer.export.fit import export_fit
 from smart_trainer.sync.base import RideUpload
@@ -14,9 +15,48 @@ from smart_trainer.sync.service import SyncService, SyncUnavailable
 
 log = logging.getLogger(__name__)
 
+# What a session file looks like on disk: (mtime_ns, size) of the database and of its WAL
+StatKey = tuple[int, int, int, int]
+
+
+def _stat_key(path: Path) -> StatKey:
+    """Fingerprint a session file, including its WAL (where recent writes live).
+
+    Args:
+        path (Path): Path of the session SQLite file.
+
+    Returns:
+        StatKey: Changes whenever the session is written to.
+    """
+    st = path.stat()
+    try:
+        wal = Path(f"{path}-wal").stat()
+    except FileNotFoundError:
+        return (st.st_mtime_ns, st.st_size, 0, 0)
+    return (st.st_mtime_ns, st.st_size, wal.st_mtime_ns, wal.st_size)
+
+
+def _export_fit(path: Path) -> Path:
+    """Export a session to FIT through its own connection (safe in a worker thread).
+
+    Args:
+        path (Path): Path of the session SQLite file.
+
+    Returns:
+        Path: The written FIT file path, next to the session file.
+    """
+    rec = Recorder.open(path)
+    try:
+        return export_fit(rec, path.with_suffix(".fit"))
+    finally:
+        rec.close()
+
 
 class SessionStore:
     """Manages the recorded sessions in one directory.
+
+    Session metadata is cached by file fingerprint, so listing the sessions only
+    re-reads the files that changed.
 
     Attributes:
         directory (Path): Directory where sessions are recorded.
@@ -33,6 +73,38 @@ class SessionStore:
         self.directory = directory
         self._sync = sync
         self._messages = messages
+        self._cache: dict[Path, tuple[StatKey, SessionInfo]] = {}
+
+    def list_sessions(self, limit: int | None = None) -> list[SessionInfo]:
+        """List the readable sessions, most recent first.
+
+        Only files that changed since the last call are read again. Blocking (file
+        I/O): call it from a worker thread in the UI.
+
+        Args:
+            limit (int | None): Look at most at this many session files (the most
+                recent ones); all if ``None``.
+
+        Returns:
+            list[SessionInfo]: The sessions (unreadable files are skipped).
+        """
+        paths = sorted(self.directory.glob("session-*.sqlite"), reverse=True)
+        present = set(paths)
+        # keep entries of files not looked at this time; drop those gone (discarded)
+        cache = {p: v for p, v in self._cache.items() if p in present}
+        out = []
+        for p in paths[:limit]:
+            try:
+                key = _stat_key(p)
+                hit = cache.get(p)
+                info = hit[1] if hit and hit[0] == key else read_info(p)
+            except Exception:
+                cache.pop(p, None)
+                continue  # unreadable, or moved away meanwhile
+            cache[p] = (key, info)
+            out.append(info)
+        self._cache = cache  # replaced, never mutated: safe across worker threads
+        return out
 
     def create(self, name: str, workout: Workout | None, ftp: int) -> Recorder:
         """Create a new session file.
@@ -71,8 +143,8 @@ class SessionStore:
         """
         info = rec.info()
         fit = None
-        if info.n_samples:
-            fit = export_fit(rec, rec.path.with_suffix(".fit"))
+        if info.n_samples:  # off the event loop: a long ride takes a while to export
+            fit = await asyncio.to_thread(_export_fit, rec.path)
         rec.set_status("finished")
         if fit and upload is None:
             if targets := self._sync.auto_upload_targets():
@@ -160,7 +232,7 @@ class SessionStore:
         Returns:
             list[SessionInfo]: The unfinished sessions.
         """
-        return [s for s in find_unfinished(self.directory) if s.path != exclude]
+        return [s for s in self.list_sessions() if s.status == "active" and s.path != exclude]
 
     def discard(self, info: SessionInfo) -> None:
         """Move a session out of the way (kept in sessions/discarded, never deleted).

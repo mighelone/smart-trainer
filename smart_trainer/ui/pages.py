@@ -22,7 +22,7 @@ from smart_trainer.config import Settings
 from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.library import builtin_workouts
-from smart_trainer.core.recorder import SessionInfo, UploadState, list_sessions
+from smart_trainer.core.recorder import SessionInfo, UploadState
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import ConnState, Role
 from smart_trainer.core.workout import Workout, WorkoutRunner, parse_zwo
@@ -1248,27 +1248,46 @@ class HistoryPage:
         e (Engine): The application engine.
     """
 
+    PAGE_SIZE = 30
+
     def __init__(self, e: Engine) -> None:
-        """Build the page.
+        """Build the page and schedule loading the sessions.
 
         Args:
             e (Engine): The application engine.
         """
         self.e = e
+        self.limit = self.PAGE_SIZE
         with ui.column().classes("page page-narrow"):
             ui.label("Sessions").classes("section-title")
             ui.label(f"Stored in {e.store.directory}").classes("hint")
             self.listing = ui.column().classes("w-full gap-2")
-        self.render()
+            self.more = (
+                ui.button("Load more", icon="expand_more", on_click=self.load_more)
+                .props("flat color=secondary")
+                .mark("history-more")
+            )
+            self.more.set_visibility(False)
+        ui.timer(0, self.render, once=True)
 
-    def render(self) -> None:
-        """Redraw the list of recorded sessions."""
+    async def render(self) -> None:
+        """Redraw the list of recorded sessions (read in a worker thread)."""
         e = self.e
+        # one extra to know whether there's more to load
+        sessions = await asyncio.to_thread(e.store.list_sessions, self.limit + 1)
         self.listing.clear()
         uploaders = e.sync.with_capability(Capability.UPLOAD)
         with self.listing:
-            for s in list_sessions(e.store.directory):
+            if not sessions:
+                ui.label("No sessions recorded yet.").classes("hint")
+            for s in sessions[: self.limit]:
                 self._session_card(s, uploaders)
+        self.more.set_visibility(len(sessions) > self.limit)
+
+    async def load_more(self) -> None:
+        """Show the next page of older sessions."""
+        self.limit += self.PAGE_SIZE
+        await self.render()
 
     def _session_card(self, s: SessionInfo, uploaders: list[Connection]) -> None:
         """Render one session with its upload state and, if needed, an upload button.
@@ -1310,7 +1329,7 @@ class HistoryPage:
         ok = bool(result) and all(result.values())
         for m in list(e.messages)[seen:]:
             ui.notify(m, type="positive" if ok else "negative")
-        self.render()
+        await self.render()
 
 
 @ui.page("/history")
