@@ -457,14 +457,16 @@ window.smartTrainerBeep ??= (() => {
     const t0 = c.currentTime + 0.05;
     for (let i = 0; i < count; i++) {
       const osc = c.createOscillator(), gain = c.createGain();
-      const t = t0 + i * 0.25;
+      const t = t0 + i * 0.3;
+      osc.type = "square";  // rich in harmonics: much louder than a sine at the same level
       osc.frequency.value = 880;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.8, t + 0.01);
+      gain.gain.setValueAtTime(0.8, t + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
       osc.connect(gain).connect(c.destination);
       osc.start(t);
-      osc.stop(t + 0.16);
+      osc.stop(t + 0.21);
     }
   };
 })();

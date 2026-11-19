@@ -85,7 +85,7 @@ def test_next_step_text():
 
 
 NODE_HARNESS = """
-const made = [], listeners = [];
+const made = [], listeners = [], gains = [];
 class FakeAudioContext {
   constructor() { this.state = "suspended"; this.currentTime = 1; this.destination = {}; }
   resume() { this.state = "running"; }
@@ -97,7 +97,11 @@ class FakeAudioContext {
     return o;
   }
   createGain() {
-    return {gain: {setValueAtTime() {}, exponentialRampToValueAtTime() {}}, connect: (d) => d};
+    const peaks = [];
+    gains.push(peaks);
+    const record = (v) => peaks.push(v);
+    const gain = {setValueAtTime: record, exponentialRampToValueAtTime: record};
+    return {gain, connect: (d) => d};
   }
 }
 globalThis.window = globalThis;
@@ -109,7 +113,8 @@ const first = window.smartTrainerBeep;
 window.smartTrainerBeep(2);
 console.log(JSON.stringify({
   same: first === window.smartTrainerBeep, listeners, made: made.map((o) => [o.at, o.end]),
-  freq: made.map((o) => o.frequency.value),
+  freq: made.map((o) => o.frequency.value), type: made.map((o) => o.type),
+  peak: Math.max(...gains.flat().filter((v) => typeof v === "number")),
 }));
 """
 
@@ -121,6 +126,7 @@ def test_beep_script_in_javascript():
     )
     result = json.loads(out.stdout)
     assert result["same"] and result["listeners"] == ["pointerdown", "keydown"]
-    assert result["freq"] == [880, 880]
-    [(a0, a1), (b0, b1)] = result["made"]  # two short beeps, 0.25 s apart
-    assert b0 - a0 == pytest.approx(0.25) and a1 - a0 == pytest.approx(0.16)
+    assert result["freq"] == [880, 880] and result["type"] == ["square", "square"]
+    assert result["peak"] == 0.8  # loud enough to hear over a video
+    [(a0, a1), (b0, b1)] = result["made"]  # two 0.2 s beeps, 0.3 s apart
+    assert b0 - a0 == pytest.approx(0.3) and a1 - a0 == pytest.approx(0.21)
