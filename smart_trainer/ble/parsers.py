@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
+from enum import IntEnum
 
 
 # --------------------------------------------------------------------------- HR
@@ -225,6 +226,16 @@ class FtmsOp:
     RESPONSE = 0x80
 
 
+class ResultCode(IntEnum):
+    """FTMS / Cycling Power control point result codes."""
+
+    SUCCESS = 0x01
+    NOT_SUPPORTED = 0x02
+    INVALID_PARAMETER = 0x03
+    FAILED = 0x04
+    CONTROL_NOT_PERMITTED = 0x05
+
+
 def cmd_request_control() -> bytes:
     """Build the FTMS *Request Control* command.
 
@@ -315,13 +326,11 @@ class ControlResponse:
 
     Attributes:
         request_op (int): Op code of the command being answered.
-        result (int): Result code (0x01 success, 0x02 not supported,
-            0x03 invalid parameter, 0x04 failed, 0x05 not permitted).
+        result (int): Result code, see ``ResultCode``.
         params (bytes): Response parameters following the result code, if any.
     """
 
     request_op: int
-    # 0x01 success, 0x02 not supported, 0x03 invalid param, 0x04 failed, 0x05 not permitted
     result: int
     params: bytes = b""
 
@@ -330,9 +339,9 @@ class ControlResponse:
         """Whether the command succeeded.
 
         Returns:
-            bool: ``True`` if the result code is 0x01 (success).
+            bool: ``True`` if the result code is ``ResultCode.SUCCESS``.
         """
-        return self.result == 0x01
+        return self.result == ResultCode.SUCCESS
 
 
 def parse_control_response(data: bytes) -> ControlResponse | None:
@@ -350,12 +359,12 @@ def parse_control_response(data: bytes) -> ControlResponse | None:
     return None
 
 
-RESULT_TEXT = {
-    0x01: "success",
-    0x02: "not supported",
-    0x03: "invalid parameter",
-    0x04: "operation failed",
-    0x05: "control not permitted",
+RESULT_TEXT: dict[int, str] = {
+    ResultCode.SUCCESS: "success",
+    ResultCode.NOT_SUPPORTED: "not supported",
+    ResultCode.INVALID_PARAMETER: "invalid parameter",
+    ResultCode.FAILED: "operation failed",
+    ResultCode.CONTROL_NOT_PERMITTED: "control not permitted",
 }
 
 

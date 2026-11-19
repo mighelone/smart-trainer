@@ -25,6 +25,7 @@ from smart_trainer.ble.parsers import (
     CadenceCalculator,
     ControlResponse,
     CpOp,
+    ResultCode,
     cmd_start_offset_compensation,
     format_offset,
     parse_cp_control_response,
@@ -171,7 +172,7 @@ class PowerMeter(BleakDevice, Calibratable):
                 "The power meter did not answer. Wake it up by turning the cranks, "
                 "then keep them still and try again."
             ) from None
-        if resp.result == 0x02:
+        if resp.result == ResultCode.NOT_SUPPORTED:
             raise CalibrationError("This power meter does not support zero-offset calibration.")
         if not resp.ok:
             raise CalibrationError(

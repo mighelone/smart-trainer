@@ -88,8 +88,25 @@ line-length = 100
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = [
+    "E", "F", "W", "I", "UP", "B",
+    "SIM",  # flake8-simplify (catches overly verbose logic)
+    "C90",  # McCabe cyclomatic complexity
+    "PLR",  # Pylint refactor & structural limits
+]
 ignore = ["E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004"]
+"smart_trainer/ble/parsers.py" = ["PLR2004"]  # payload-length checks / byte offsets
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-nested-blocks = 4
+max-branches = 10
+max-args = 8
 
 [tool.pyrefly]
 project-includes = ["smart_trainer", "tests"]

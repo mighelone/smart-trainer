@@ -75,10 +75,10 @@ class PowerMatcher:
         settled = now - self._target_changed_at >= c.settle_s
         riding = (snapshot.cadence or 0) >= c.min_cadence
         pedal_avg, trainer_avg = snapshot.pedal_avg, snapshot.trainer_avg
-        if settled and riding and pedal_avg and pedal_avg > 30:
-            if trainer_avg and trainer_avg > 30:
+        if settled and riding and pedal_avg and pedal_avg > c.min_power_w:
+            if trainer_avg and trainer_avg > c.min_power_w:
                 r = trainer_avg / pedal_avg
-                if 0.7 < r < 1.3:
+                if c.ratio_min < r < c.ratio_max:
                     self.ratio += (r - self.ratio) * c.ratio_alpha
             error = target - pedal_avg
             self.integral += c.ki * error

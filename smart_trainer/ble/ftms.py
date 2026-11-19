@@ -25,6 +25,7 @@ from smart_trainer.ble.parsers import (
     FtmsOp,
     FtmsStatus,
     MachineStatus,
+    ResultCode,
     SpinDownStatus,
     cmd_request_control,
     cmd_set_simulation,
@@ -190,7 +191,7 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
         if not self.has_control:
             await self._take_control()
         r = await self._write(payload)
-        if r is not None and r.result == 0x05:  # control not permitted -> retake once
+        if r is not None and r.result == ResultCode.CONTROL_NOT_PERMITTED:  # retake once
             await self._take_control()
             r = await self._write(payload)
         return bool(r and r.ok)
@@ -267,7 +268,7 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
         while not self._status.empty():
             self._status.get_nowait()
         r = await self._write(cmd_spin_down(start=True))
-        if r is not None and r.result == 0x05:  # control not permitted -> retake once
+        if r is not None and r.result == ResultCode.CONTROL_NOT_PERMITTED:  # retake once
             await self._take_control()
             r = await self._write(cmd_spin_down(start=True))
         if r is None:
