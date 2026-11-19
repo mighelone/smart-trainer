@@ -10,6 +10,14 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Changed
+- The intervals.icu API key is now stored like the other connection secrets (Keychain entry
+  `intervals.api_key`). A key saved by 0.3.x is moved there automatically on first launch, so
+  there is nothing to re-enter, but downgrading afterwards means entering the key again.
+- The environment override for the intervals.icu API key is now
+  `SMART_TRAINER_INTERVALS_API_KEY`, matching the Strava secrets. `INTERVALS_API_KEY` still works
+  but logs a deprecation warning.
+
 ## [0.3.0] - 2026-11-19
 
 ### Added

@@ -20,7 +20,6 @@ APP_DIR = Path(
     )
 )
 KEYRING_SERVICE = "smart-trainer"
-KEYRING_INTERVALS = "intervals.icu"
 # Coggan power zone upper bounds, % of FTP (the last zone is open-ended)
 DEFAULT_POWER_ZONES = (55, 75, 90, 105, 120, 150, 999)
 
@@ -231,7 +230,7 @@ def sessions_dir() -> Path:
     return d
 
 
-def _secret_env(conn_id: str, name: str) -> str:
+def secret_env(conn_id: str, name: str) -> str:
     """Environment variable that overrides a secret, e.g. ``SMART_TRAINER_STRAVA_CLIENT_SECRET``."""
     return re.sub(r"[^A-Z0-9]+", "_", f"SMART_TRAINER_{conn_id}_{name}".upper())
 
@@ -246,7 +245,7 @@ def get_secret(conn_id: str, name: str) -> str | None:
     Returns:
         str | None: The secret, or ``None`` if not set.
     """
-    if value := os.environ.get(_secret_env(conn_id, name)):
+    if value := os.environ.get(secret_env(conn_id, name)):
         return value
     try:
         import keyring
@@ -284,32 +283,30 @@ def delete_secret(conn_id: str, name: str) -> None:
         keyring.delete_password(KEYRING_SERVICE, f"{conn_id}.{name}")
 
 
-def get_api_key() -> str | None:
-    """Get the intervals.icu API key.
-
-    Looks at the ``INTERVALS_API_KEY`` environment variable first, then the
-    system keyring.
-
-    Returns:
-        str | None: The API key, or ``None`` if not configured.
-    """
-    if key := os.environ.get("INTERVALS_API_KEY"):
-        return key
-    try:
-        import keyring
-
-        return keyring.get_password(KEYRING_SERVICE, KEYRING_INTERVALS)
-    except Exception:
-        log.exception("keyring unavailable")
-        return None
-
-
-def set_api_key(key: str) -> None:
-    """Store the intervals.icu API key in the system keyring.
+def migrate_secret(old_account: str, conn_id: str, name: str) -> str | None:
+    """Move a secret stored under an old keyring account to ``{conn_id}.{name}``.
 
     Args:
-        key (str): The API key.
-    """
-    import keyring
+        old_account (str): Keyring account (user name) the secret used to be stored under.
+        conn_id (str): Connection id of the new location.
+        name (str): Secret name of the new location.
 
-    keyring.set_password(KEYRING_SERVICE, KEYRING_INTERVALS, key)
+    Returns:
+        str | None: The moved secret, or ``None`` if there was nothing to move or the
+        keyring is unavailable.
+    """
+    try:
+        import keyring
+        from keyring.errors import PasswordDeleteError
+
+        value = keyring.get_password(KEYRING_SERVICE, old_account)
+        if not value:
+            return None
+        set_secret(conn_id, name, value)
+        with contextlib.suppress(PasswordDeleteError):
+            keyring.delete_password(KEYRING_SERVICE, old_account)
+    except Exception:
+        log.exception("could not migrate keyring secret %r", old_account)
+        return None
+    log.info("moved keyring secret %r to %s.%s", old_account, conn_id, name)
+    return value

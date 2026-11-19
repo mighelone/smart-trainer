@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date
+from functools import cache
 from typing import Self
 
 import httpx
 
-from smart_trainer.config import get_api_key, set_api_key
+from smart_trainer.config import get_secret, migrate_secret, secret_env, set_secret
 from smart_trainer.core.workout import parse_intervals_doc, parse_zwo
 from smart_trainer.sync.base import (
     AthleteProfile,
@@ -21,6 +23,14 @@ from smart_trainer.sync.base import (
 
 log = logging.getLogger(__name__)
 BASE_URL = "https://intervals.icu/api/v1"
+LEGACY_KEYRING_ACCOUNT = "intervals.icu"  # keyring account of the API key up to 0.3.x
+LEGACY_ENV = "INTERVALS_API_KEY"  # deprecated API key override
+
+
+@cache
+def _warn_legacy_env() -> None:
+    """Warn (once per process) that the deprecated API key variable is in use."""
+    log.warning("%s is deprecated: set %s instead", LEGACY_ENV, secret_env("intervals", "api_key"))
 
 
 def _ride_settings(athlete: dict) -> dict:
@@ -257,7 +267,9 @@ class IntervalsConnection(Connection):
     """intervals.icu: planned workouts, rider profile and ride upload.
 
     Options: ``athlete_id`` (``"0"`` means the owner of the API key).
-    Secret: the API key (``get_api_key``/``set_api_key``).
+    Secret: ``api_key``, in the keyring or ``SMART_TRAINER_INTERVALS_API_KEY``
+    (``INTERVALS_API_KEY`` is still read but deprecated). A key stored by 0.3.x under the
+    old keyring account is moved on first use.
     """
 
     id = "intervals"
@@ -273,13 +285,32 @@ class IntervalsConnection(Connection):
         """
         return str(self.options.get("athlete_id") or "0")
 
+    @property
+    def api_key(self) -> str | None:
+        """The stored API key.
+
+        Environment variables override the keyring, and the current variable wins over the
+        deprecated ``INTERVALS_API_KEY``.
+
+        Returns:
+            str | None: The API key, or ``None`` if not configured.
+        """
+        if not os.environ.get(secret_env(self.id, "api_key")) and (
+            key := os.environ.get(LEGACY_ENV)
+        ):
+            _warn_legacy_env()
+            return key
+        return get_secret(self.id, "api_key") or migrate_secret(
+            LEGACY_KEYRING_ACCOUNT, self.id, "api_key"
+        )
+
     def is_configured(self) -> bool:
         """Whether an API key is set.
 
         Returns:
             bool: ``True`` if configured.
         """
-        return bool(get_api_key())
+        return bool(self.api_key)
 
     def set_api_key(self, key: str) -> None:
         """Store the API key.
@@ -287,7 +318,7 @@ class IntervalsConnection(Connection):
         Args:
             key (str): The API key.
         """
-        set_api_key(key)
+        set_secret(self.id, "api_key", key)
 
     def client(self, api_key: str | None = None) -> IntervalsClient:
         """Create an API client.
@@ -301,7 +332,7 @@ class IntervalsConnection(Connection):
         Returns:
             IntervalsClient: A new client (close it after use).
         """
-        key = api_key or get_api_key()
+        key = api_key or self.api_key
         if not key:
             raise IntervalsError("No intervals.icu API key")
         return IntervalsClient(key, self.athlete_id)

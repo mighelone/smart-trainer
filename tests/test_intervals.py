@@ -73,3 +73,82 @@ async def test_bad_key():
     with pytest.raises(IntervalsError):
         await c.list_workouts(date(2026, 11, 16), date(2026, 11, 18), ftp=250)
     await c.aclose()
+
+
+# ------------------------------------------------- API key storage and migration
+class FakeKeyring:
+    """In-memory stand-in for the keyring module functions used by config."""
+
+    def __init__(self) -> None:
+        self.store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, account: str) -> str | None:
+        return self.store.get((service, account))
+
+    def set_password(self, service: str, account: str, value: str) -> None:
+        self.store[(service, account)] = value
+
+    def delete_password(self, service: str, account: str) -> None:
+        from keyring.errors import PasswordDeleteError
+
+        if (service, account) not in self.store:
+            raise PasswordDeleteError("not found")
+        del self.store[(service, account)]
+
+
+LEGACY = ("smart-trainer", "intervals.icu")
+NEW = ("smart-trainer", "intervals.api_key")
+
+
+@pytest.fixture
+def kr(monkeypatch):
+    import keyring
+
+    fake = FakeKeyring()
+    for name in ("get_password", "set_password", "delete_password"):
+        monkeypatch.setattr(keyring, name, getattr(fake, name))
+    monkeypatch.delenv("INTERVALS_API_KEY", raising=False)
+    monkeypatch.delenv("SMART_TRAINER_INTERVALS_API_KEY", raising=False)
+    return fake
+
+
+@pytest.fixture
+def conn():
+    from smart_trainer.config import Settings
+    from smart_trainer.sync.intervals import IntervalsConnection
+
+    return IntervalsConnection(Settings())
+
+
+def test_api_key_migrates_legacy_keyring_entry(kr, conn):
+    kr.store[LEGACY] = "old-key"
+    assert conn.api_key == "old-key"
+    assert kr.store == {NEW: "old-key"}  # copied to the new entry, legacy entry removed
+    assert conn.api_key == "old-key"  # now read from the new entry
+
+
+def test_api_key_new_entry_wins_and_keeps_legacy(kr, conn):
+    kr.store[NEW], kr.store[LEGACY] = "new-key", "old-key"
+    assert conn.api_key == "new-key"
+    assert kr.store[LEGACY] == "old-key"  # untouched: no migration needed
+
+
+def test_api_key_missing(kr, conn):
+    assert conn.api_key is None
+    assert not conn.is_configured()
+    with pytest.raises(IntervalsError):
+        conn.client()
+
+
+def test_api_key_env_precedence(kr, conn, monkeypatch):
+    kr.store[NEW] = "stored"
+    monkeypatch.setenv("INTERVALS_API_KEY", "legacy-env")
+    assert conn.api_key == "legacy-env"  # env overrides the keyring
+    monkeypatch.setenv("SMART_TRAINER_INTERVALS_API_KEY", "new-env")
+    assert conn.api_key == "new-env"  # the current variable wins over the deprecated one
+
+
+def test_set_api_key_writes_new_entry(kr, conn):
+    conn.set_api_key("typed")
+    assert kr.store == {NEW: "typed"}
+    assert conn.is_configured()

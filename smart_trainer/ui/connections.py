@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from fastapi.responses import HTMLResponse
 from nicegui import app, ui
 
-from smart_trainer.config import get_api_key, get_secret, set_secret
+from smart_trainer.config import get_secret, set_secret
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.sync.intervals import IntervalsConnection
 from smart_trainer.sync.strava import StravaConnection, authorize_url
@@ -108,7 +108,7 @@ def intervals_settings(conn: Connection, on_change: OnChange) -> None:
         "API key",
         password=True,
         password_toggle_button=True,
-        placeholder="(saved)" if get_api_key() else "",
+        placeholder="(saved)" if conn.api_key else "",
     )
     athlete = ui.input("Athlete ID", value=conn.athlete_id).tooltip("Leave 0 for your own account")
 
@@ -128,7 +128,7 @@ def intervals_settings(conn: Connection, on_change: OnChange) -> None:
     async def test() -> None:
         """Test the typed (or stored) API key."""
         conn.options["athlete_id"] = athlete.value.strip() or "0"
-        if not (key.value.strip() or get_api_key()):
+        if not (key.value.strip() or conn.api_key):
             ui.notify("Enter an API key first", type="warning")
             return
         await _test(conn, api_key=key.value.strip() or None)
