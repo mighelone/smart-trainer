@@ -11,6 +11,7 @@ from smart_trainer.core.devices import DeviceHub
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import Ride
 from smart_trainer.core.state import Snapshot
+from smart_trainer.ui.strava_auth import StravaAuthorization
 from smart_trainer.ui.window import MiniWindow
 
 
@@ -21,12 +22,14 @@ class AppContext:
     Attributes:
         engine (Engine): The application engine.
         settings (Settings): User settings (the same object the engine uses).
+        strava (StravaAuthorization): Strava OAuth flow (pending requests, redirect route).
         window (MiniWindow): Full app / mini overlay switcher.
         fake (bool): Whether the app runs with simulated devices.
     """
 
     engine: Engine
     settings: Settings
+    strava: StravaAuthorization
     window: MiniWindow = field(default_factory=MiniWindow)
     fake: bool = False
 

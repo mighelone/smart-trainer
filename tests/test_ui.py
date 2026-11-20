@@ -12,10 +12,10 @@ from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import ConnState, Role
-from smart_trainer.ui import connections
 from smart_trainer.ui.context import AppContext, LiveRide
 from smart_trainer.ui.pages.history import HistoryPage
 from smart_trainer.ui.pages.live import ride_status
+from smart_trainer.ui.strava_auth import StravaAuthorization
 from smart_trainer.ui.window import MINI_SIZE
 
 pytestmark = pytest.mark.nicegui_main_file("tests/ui_main.py")
@@ -58,7 +58,8 @@ async def context(pages, tmp_path, settings):
     e.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
     e.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
     e.devices.add(fake.FakeHeartRate(), [Role.HR])
-    ctx = AppContext(engine=e, settings=settings, fake=True)
+    strava = StravaAuthorization(settings, 8080, open_url=lambda url: None)
+    ctx = AppContext(engine=e, settings=settings, strava=strava, fake=True)
     pages.register_pages(ctx)
     async with e:
         await asyncio.sleep(0.4)  # let the fake devices connect
@@ -364,19 +365,6 @@ async def test_start_rides_the_selected_workout(user: User, engine):
     user.find("Start").click()
     await user.should_see("Started: Picked")
     assert engine.ride.runner and engine.ride.runner.workout is workout
-
-
-async def test_strava_callback_route_is_registered(user: User, context, pages):
-    paths = {getattr(route, "path", None) for route in app.routes}
-    assert connections.STRAVA_CALLBACK in paths
-
-
-async def test_strava_callback_rejects_an_unknown_request(user: User, context, pages):
-    response = await connections.finish_strava_authorization(
-        context.settings, "never-sent", "code", "", "activity:write"
-    )
-    assert response.status_code == 400
-    assert "Strava connection failed" in bytes(response.body).decode()
 
 
 async def test_live_ride_reads_the_latest_snapshot(tmp_path, settings):

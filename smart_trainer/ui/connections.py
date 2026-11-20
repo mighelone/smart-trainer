@@ -1,80 +1,44 @@
-"""Settings cards of the connections, and the Strava OAuth callback.
+"""Settings cards of the connections: shared switches plus each connection's own form.
 
 Each connection gets a card with its enable/auto-upload switches. Connection-specific
-fields come from a renderer registered with :func:`settings_renderer`. A connection
-without a renderer still gets the generic card.
+fields come from the form that :func:`connection_forms` maps to its id; a connection
+without a form still gets the generic card.
 """
 
 from __future__ import annotations
 
 import logging
-import secrets
-import webbrowser
 from collections.abc import Awaitable, Callable
 
-from fastapi.responses import HTMLResponse
-from nicegui import app, ui
+from nicegui import ui
 
-from smart_trainer.config import Settings, get_api_key, get_secret, set_secret
+from smart_trainer.config import get_api_key, get_secret, set_secret
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.sync.intervals import IntervalsConnection
-from smart_trainer.sync.strava import StravaConnection, authorize_url
+from smart_trainer.sync.strava import StravaConnection
+from smart_trainer.ui.strava_auth import StravaAuthorization
 
 log = logging.getLogger(__name__)
 
 # Called after credentials change, e.g. to sync the profile right away
 OnChange = Callable[[], Awaitable[None]]
-Renderer = Callable[[Connection, OnChange], None]
-RENDERERS: dict[str, Renderer] = {}
-STRAVA_CALLBACK = "/connections/strava/callback"
-_strava_states: set[str] = set()  # pending OAuth requests
-server_port: int = 8080  # set by main.run(); the OAuth redirect goes to this local port
+# Builds a connection's own form inside its card
+FormFactory = Callable[[Connection, OnChange], object]
 
 
-def settings_renderer(conn_id: str) -> Callable[[Renderer], Renderer]:
-    """Register the function that renders a connection's specific settings.
+def connection_forms(authorization: StravaAuthorization) -> dict[str, FormFactory]:
+    """The form of each connection that has settings of its own.
 
     Args:
-        conn_id (str): Connection id.
+        authorization (StravaAuthorization): Strava OAuth flow, used by the Strava form.
 
     Returns:
-        Callable[[Renderer], Renderer]: Decorator.
+        dict[str, FormFactory]: Form factory by connection id.
     """
-
-    def deco(fn: Renderer) -> Renderer:
-        RENDERERS[conn_id] = fn
-        return fn
-
-    return deco
-
-
-def connection_card(conn: Connection, on_change: OnChange) -> None:
-    """Render the settings card of a connection.
-
-    Args:
-        conn (Connection): The connection.
-        on_change (OnChange): Called after the connection's credentials change.
-    """
-    cs = conn.conf
-
-    def persist() -> None:
-        """Save the switches."""
-        switches = {"enabled": bool(enabled.value)}
-        if auto is not None:
-            switches["auto_upload"] = bool(auto.value)
-        conn.update_settings(**switches)
-
-    with ui.row().classes("items-center w-full mt-2"):
-        ui.label(conn.name).classes("section-title")
-        ui.space()
-        enabled = ui.switch("Enabled", value=cs.enabled, on_change=persist)
-    auto = None
-    if conn.has(Capability.UPLOAD):
-        auto = ui.switch(
-            "Upload automatically after each ride", value=cs.auto_upload, on_change=persist
-        )
-    if renderer := RENDERERS.get(conn.id):
-        renderer(conn, on_change)
+    return {
+        IntervalsConnection.id: IntervalsForm,
+        StravaConnection.id: lambda conn, _on_change: StravaForm(conn, authorization),
+    }
 
 
 async def _test(conn: Connection, **kw) -> None:
@@ -90,223 +54,178 @@ async def _test(conn: Connection, **kw) -> None:
         ui.notify(str(exc), type="negative")
 
 
-# ============================================================ intervals.icu
-@settings_renderer(IntervalsConnection.id)
-def intervals_settings(conn: Connection, on_change: OnChange) -> None:
-    """intervals.icu: API key and athlete id.
+class ConnectionCard:
+    """Settings card of a connection: enable and auto-upload switches, then its own form."""
 
-    Args:
-        conn (Connection): The intervals.icu connection.
-        on_change (OnChange): Called after the API key changes.
-    """
-    assert isinstance(conn, IntervalsConnection)
-    ui.label(
-        "Find your API key at intervals.icu → Settings → Developer Settings. "
-        "It is stored in the macOS Keychain."
-    ).classes("hint")
-    key = ui.input(
-        "API key",
-        password=True,
-        password_toggle_button=True,
-        placeholder="(saved)" if get_api_key() else "",
-    )
-    athlete = ui.input("Athlete ID", value=conn.athlete_id).tooltip("Leave 0 for your own account")
+    def __init__(self, conn: Connection, on_change: OnChange, form: FormFactory | None) -> None:
+        """Build the card.
 
-    async def save() -> None:
+        Args:
+            conn (Connection): The connection.
+            on_change (OnChange): Called after the connection's credentials change.
+            form (FormFactory | None): Builds the connection's own fields, if it has any.
+        """
+        self.conn = conn
+        with ui.row().classes("items-center w-full mt-2"):
+            ui.label(conn.name).classes("section-title")
+            ui.space()
+            self.enabled = ui.switch("Enabled", value=conn.conf.enabled, on_change=self.persist)
+        self.auto = None
+        if conn.has(Capability.UPLOAD):
+            self.auto = ui.switch(
+                "Upload automatically after each ride",
+                value=conn.conf.auto_upload,
+                on_change=self.persist,
+            )
+        if form:
+            form(conn, on_change)
+
+    def persist(self) -> None:
+        """Save the switches."""
+        switches = {"enabled": bool(self.enabled.value)}
+        if self.auto is not None:
+            switches["auto_upload"] = bool(self.auto.value)
+        self.conn.update_settings(**switches)
+
+
+class IntervalsForm:
+    """intervals.icu settings: API key and athlete id."""
+
+    def __init__(self, conn: Connection, on_change: OnChange) -> None:
+        """Build the form.
+
+        Args:
+            conn (Connection): The intervals.icu connection.
+            on_change (OnChange): Called after the API key changes.
+        """
+        assert isinstance(conn, IntervalsConnection)
+        self.conn = conn
+        self.on_change = on_change
+        ui.label(
+            "Find your API key at intervals.icu → Settings → Developer Settings. "
+            "It is stored in the macOS Keychain."
+        ).classes("hint")
+        self.key = ui.input(
+            "API key",
+            password=True,
+            password_toggle_button=True,
+            placeholder="(saved)" if get_api_key() else "",
+        )
+        self.athlete = (
+            ui.input("Athlete ID", value=conn.athlete_id)
+            .tooltip("Leave 0 for your own account")
+            .mark("intervals-athlete")
+        )
+        with ui.row():
+            ui.button("Save", icon="save", on_click=self.save).props("color=positive").mark(
+                "intervals-save"
+            )
+            ui.button("Test connection", icon="wifi_tethering", on_click=self.test).props(
+                "color=secondary"
+            )
+
+    async def save(self) -> None:
         """Store the API key and athlete id."""
-        conn.update_settings(options={"athlete_id": athlete.value.strip() or "0"})
-        new_key = key.value.strip()
+        self.conn.update_settings(options={"athlete_id": self.athlete.value.strip() or "0"})
+        new_key = self.key.value.strip()
         if new_key:
-            conn.set_api_key(new_key)
-            key.value = ""
-            key.props('placeholder="(saved)"')
+            self.conn.set_api_key(new_key)
+            self.key.value = ""
+            self.key.props('placeholder="(saved)"')
         ui.notify("intervals.icu settings saved", type="positive")
         if new_key:
-            await on_change()
+            await self.on_change()
 
-    async def test() -> None:
+    async def test(self) -> None:
         """Test the typed (or stored) API key."""
-        if not (key.value.strip() or get_api_key()):
+        typed = self.key.value.strip()
+        if not (typed or get_api_key()):
             ui.notify("Enter an API key first", type="warning")
             return
-        await _test(
-            conn, api_key=key.value.strip() or None, athlete_id=athlete.value.strip() or "0"
-        )
-
-    with ui.row():
-        ui.button("Save", icon="save", on_click=save).props("color=positive")
-        ui.button("Test connection", icon="wifi_tethering", on_click=test).props("color=secondary")
+        await _test(self.conn, api_key=typed or None, athlete_id=self.athlete.value.strip() or "0")
 
 
-# =================================================================== Strava
-def strava_redirect_uri() -> str:
-    """Local URL Strava redirects to after authorization.
+class StravaForm:
+    """Strava settings: API application credentials and the OAuth connection."""
 
-    Strava accepts any port on ``localhost``/``127.0.0.1``, so the random port of the
-    native window works too.
+    def __init__(self, conn: Connection, authorization: StravaAuthorization) -> None:
+        """Build the form.
 
-    Returns:
-        str: The redirect URI.
-    """
-    return f"http://127.0.0.1:{server_port}{STRAVA_CALLBACK}"
+        Args:
+            conn (Connection): The Strava connection.
+            authorization (StravaAuthorization): Starts the OAuth flow.
+        """
+        assert isinstance(conn, StravaConnection)
+        self.conn = conn
+        self.authorization = authorization
+        ui.html(
+            "Create your own API application at "
+            '<a href="https://www.strava.com/settings/api" target="_blank">'
+            "strava.com/settings/api</a> with <b>Authorization Callback Domain</b> "
+            "<code>localhost</code>, then enter its Client ID and Client Secret and connect. "
+            "The secret is stored in the macOS Keychain."
+        ).classes("hint")
+        self.client_id = ui.input("Client ID", value=conn.client_id).mark("strava-client-id")
+        self.client_secret = ui.input(
+            "Client Secret",
+            password=True,
+            password_toggle_button=True,
+            placeholder="(saved)" if get_secret(conn.id, "client_secret") else "",
+        ).mark("strava-client-secret")
+        self.status = ui.label("").classes("hint")
+        self._build_buttons()
+        self.refresh()
+        ui.timer(2.0, self.refresh)  # picks up the authorization completed in the browser
 
+    def _build_buttons(self) -> None:
+        """Build the Connect, Test and Disconnect buttons."""
+        with ui.row():
+            ui.button("Connect with Strava", icon="link", on_click=self.connect).props(
+                "color=positive"
+            )
+            self.test_btn = ui.button(
+                "Test connection", icon="wifi_tethering", on_click=lambda: _test(self.conn)
+            ).props("color=secondary")
+            self.disconnect_btn = ui.button(
+                "Disconnect", icon="link_off", on_click=self.disconnect
+            ).props("flat")
 
-@settings_renderer(StravaConnection.id)
-def strava_settings(conn: Connection, on_change: OnChange) -> None:
-    """Strava: API application credentials and the OAuth connection.
-
-    Args:
-        conn (Connection): The Strava connection.
-        on_change (OnChange): Called after connecting.
-    """
-    assert isinstance(conn, StravaConnection)
-    ui.html(
-        "Create your own API application at "
-        '<a href="https://www.strava.com/settings/api" target="_blank">'
-        "strava.com/settings/api</a> with <b>Authorization Callback Domain</b> "
-        "<code>localhost</code>, then enter its Client ID and Client Secret and connect. "
-        "The secret is stored in the macOS Keychain."
-    ).classes("hint")
-    client_id = ui.input("Client ID", value=conn.client_id)
-    client_secret = ui.input(
-        "Client Secret",
-        password=True,
-        password_toggle_button=True,
-        placeholder="(saved)" if get_secret(conn.id, "client_secret") else "",
-    )
-    status = ui.label("").classes("hint")
-
-    def refresh() -> None:
+    def refresh(self) -> None:
         """Show whether the account is connected."""
-        connected = conn.is_configured()
-        athlete = conn.options.get("athlete")
-        status.set_text(f"Connected as {athlete or 'athlete'}" if connected else "Not connected")
-        disconnect_btn.set_visibility(connected)
-        test_btn.set_visibility(connected)
+        connected = self.conn.is_configured()
+        athlete = self.conn.options.get("athlete")
+        self.status.set_text(
+            f"Connected as {athlete or 'athlete'}" if connected else "Not connected"
+        )
+        self.disconnect_btn.set_visibility(connected)
+        self.test_btn.set_visibility(connected)
 
-    def save_credentials() -> bool:
+    def save_credentials(self) -> bool:
         """Store the typed Client ID and Secret.
 
         Returns:
             bool: ``True`` if both are now set.
         """
-        conn.update_settings(options={"client_id": client_id.value.strip()})
-        if secret := client_secret.value.strip():
-            set_secret(conn.id, "client_secret", secret)
-            client_secret.value = ""
-            client_secret.props('placeholder="(saved)"')
-        return bool(conn.client_id and get_secret(conn.id, "client_secret"))
+        self.conn.update_settings(options={"client_id": self.client_id.value.strip()})
+        if secret := self.client_secret.value.strip():
+            set_secret(self.conn.id, "client_secret", secret)
+            self.client_secret.value = ""
+            self.client_secret.props('placeholder="(saved)"')
+        return bool(self.conn.client_id and get_secret(self.conn.id, "client_secret"))
 
-    def connect() -> None:
+    def connect(self) -> None:
         """Open the Strava authorization page in the system browser."""
-        if conn.settings.readonly:
+        if self.conn.settings.readonly:
             ui.notify("Demo mode: connections can't be changed", type="warning")
             return
-        if not save_credentials():
+        if not self.save_credentials():
             ui.notify("Enter the Client ID and Client Secret first", type="warning")
             return
-        state = secrets.token_urlsafe(16)
-        _strava_states.add(state)
-        url = authorize_url(conn.client_id, strava_redirect_uri(), state)
-        # The system browser (not this page): works in the native window and when the
-        # page is open on an iPad, since the callback goes to this computer.
-        webbrowser.open(url)
+        self.authorization.begin(self.conn.client_id)
         ui.notify("Authorize Smart Trainer in the browser window that just opened")
 
-    def disconnect() -> None:
+    def disconnect(self) -> None:
         """Forget the Strava authorization."""
-        conn.disconnect()
-        refresh()
+        self.conn.disconnect()
+        self.refresh()
         ui.notify("Disconnected from Strava")
-
-    with ui.row():
-        ui.button("Connect with Strava", icon="link", on_click=connect).props("color=positive")
-        test_btn = ui.button(
-            "Test connection", icon="wifi_tethering", on_click=lambda: _test(conn)
-        ).props("color=secondary")
-        disconnect_btn = ui.button("Disconnect", icon="link_off", on_click=disconnect).props("flat")
-    refresh()
-    ui.timer(2.0, refresh)  # picks up the authorization completed in the browser
-
-
-def _page(title: str, text: str, status_code: int = 200) -> HTMLResponse:
-    """Small HTML page shown in the browser after the OAuth redirect.
-
-    Args:
-        title (str): Heading.
-        text (str): Message.
-        status_code (int): HTTP status.
-
-    Returns:
-        HTMLResponse: The page.
-    """
-    from html import escape
-
-    return HTMLResponse(
-        "<!doctype html><meta charset=utf-8><title>Smart Trainer</title>"
-        "<body style='font-family:system-ui;background:#0f1418;color:#e6edf3;"
-        "display:grid;place-items:center;height:100vh;margin:0'>"
-        f"<div style='text-align:center'><h2>{escape(title)}</h2><p>{escape(text)}</p></div>",
-        status_code=status_code,
-    )
-
-
-def register_strava_callback(settings: Settings) -> None:
-    """Add the route the Strava OAuth redirect comes back to.
-
-    Args:
-        settings (Settings): User settings, where the Strava connection is stored.
-    """
-
-    @app.get(STRAVA_CALLBACK)
-    async def strava_callback(
-        state: str = "", code: str = "", error: str = "", scope: str = ""
-    ) -> HTMLResponse:
-        """Finish the Strava OAuth flow.
-
-        Args:
-            state (str): The value sent with the authorization request.
-            code (str): Authorization code.
-            error (str): Set by Strava when the user denied access.
-            scope (str): Scopes the user granted.
-
-        Returns:
-            HTMLResponse: A page telling the user the outcome.
-        """
-        return await finish_strava_authorization(settings, state, code, error, scope)
-
-
-async def finish_strava_authorization(
-    settings: Settings, state: str, code: str, error: str, scope: str
-) -> HTMLResponse:
-    """Trade the OAuth code for tokens and store them.
-
-    Args:
-        settings (Settings): User settings, where the Strava connection is stored.
-        state (str): The value sent with the authorization request.
-        code (str): Authorization code.
-        error (str): Set by Strava when the user denied access.
-        scope (str): Scopes the user granted.
-
-    Returns:
-        HTMLResponse: A page telling the user the outcome.
-    """
-    if state not in _strava_states:
-        return _page("Strava connection failed", "Unknown request: connect again.", 400)
-    _strava_states.discard(state)
-    if error or not code:
-        return _page("Strava connection cancelled", "Smart Trainer was not authorized.", 400)
-    if "activity:write" not in scope.split(","):
-        return _page(
-            "Missing permission",
-            "Allow 'Upload your activities' so rides can be uploaded. Connect again.",
-            400,
-        )
-    conn = StravaConnection(settings)
-    try:
-        name = await conn.authorize(code)
-    except Exception as exc:
-        log.warning("Strava authorization failed: %s", exc)
-        return _page("Strava connection failed", str(exc), 400)
-    log.info("connected to Strava as %s", name)
-    return _page(f"Connected to Strava as {name}", "You can close this tab.")

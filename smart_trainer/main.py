@@ -18,9 +18,9 @@ from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
 from smart_trainer.sync import registry
 from smart_trainer.sync.base import Capability
-from smart_trainer.ui import connections
 from smart_trainer.ui.context import AppContext
 from smart_trainer.ui.pages import register_pages
+from smart_trainer.ui.strava_auth import StravaAuthorization
 from smart_trainer.ui.window import FULL_SIZE, MINI_SIZE, MiniWindow
 
 log = logging.getLogger("smart_trainer")
@@ -28,12 +28,13 @@ _background: set[asyncio.Task] = set()  # keep references so tasks aren't garbag
 _lifetime = AsyncExitStack()  # enters the engine at startup, exits it at shutdown
 
 
-def _build(use_fake: bool, start_mini: bool) -> AppContext:
+def _build(use_fake: bool, start_mini: bool, port: int) -> AppContext:
     """Load the settings and build the engine and the pages' context.
 
     Args:
         use_fake (bool): Use a read-only demo configuration and session folder.
         start_mini (bool): Open the mini overlay on the first visit.
+        port (int): Local port of the app's server (the Strava OAuth redirect comes back to it).
 
     Returns:
         AppContext: The app's objects.
@@ -52,7 +53,11 @@ def _build(use_fake: bool, start_mini: bool) -> AppContext:
         settings, sessions=sessions, connections=lambda: registry.all_connections(settings)
     )
     return AppContext(
-        engine=engine, settings=settings, window=MiniWindow(start_mini), fake=use_fake
+        engine=engine,
+        settings=settings,
+        window=MiniWindow(start_mini),
+        strava=StravaAuthorization(settings, port),
+        fake=use_fake,
     )
 
 
@@ -113,19 +118,18 @@ def run() -> None:
     if log_file := setup_logging(to_file=args.native):
         log.info("logging to %s", log_file)
 
-    # The native window runs in a child process that re-runs this function (ui.run returns
-    # there right away): only the server process builds the engine and the pages.
-    if multiprocessing.current_process().name == "MainProcess":
-        ctx = _build(args.fake, start_mini=args.mini)
-        register_pages(ctx)
-        app.on_startup(lambda: _startup(ctx))
-        app.on_shutdown(_lifetime.aclose)
     port = args.port
     if port is None:
         # A native window doesn't need a stable URL, so avoid clashing with other apps;
         # with --lan the iPad needs a predictable address.
         port = 8080 if args.lan or not args.native else native.find_open_port()
-    connections.server_port = port  # the Strava OAuth redirect comes back to this port
+    # The native window runs in a child process that re-runs this function (ui.run returns
+    # there right away): only the server process builds the engine and the pages.
+    if multiprocessing.current_process().name == "MainProcess":
+        ctx = _build(args.fake, start_mini=args.mini, port=port)
+        register_pages(ctx)
+        app.on_startup(lambda: _startup(ctx))
+        app.on_shutdown(_lifetime.aclose)
     ui.run(
         title="Smart Trainer",
         dark=True,
