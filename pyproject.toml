@@ -108,7 +108,7 @@ ignore = ["E731"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR2004"]
-"smart_trainer/ble/parsers.py" = ["PLR2004"]  # payload-length checks / byte offsets
+"smart_trainer/ble/parsers/*.py" = ["PLR2004"]  # payload-length checks / byte offsets
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

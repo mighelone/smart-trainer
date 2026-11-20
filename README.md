@@ -113,7 +113,7 @@ launch offers **Resume** (continues the workout where it stopped), **Finish & sa
 ## Layout
 | Path | What |
 |---|---|
-| `smart_trainer/ble/` | BLE parsers and drivers: `ftms.py`, `cycling_power.py`, `heart_rate.py`, `fake.py` |
+| `smart_trainer/ble/` | BLE drivers (`ftms.py`, `cycling_power.py`, `heart_rate.py`, `fake.py`) and their payload parsers (`parsers/`) |
 | `smart_trainer/core/` | engine (1 Hz loop), source selection, trainer control and power matching, workouts, recorder |
 | `smart_trainer/export/fit.py` | FIT activity export |
 | `smart_trainer/sync/` | connections: `base.py` (interface), `registry.py`, `intervals.py`, `strava.py` |

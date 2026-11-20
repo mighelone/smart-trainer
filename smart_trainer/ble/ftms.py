@@ -21,11 +21,11 @@ from smart_trainer.ble.device import (
     ProgressCallback,
     register,
 )
-from smart_trainer.ble.parsers import (
+from smart_trainer.ble.parsers.control import ResultCode, result_text
+from smart_trainer.ble.parsers.ftms import (
     FtmsOp,
     FtmsStatus,
     MachineStatus,
-    ResultCode,
     SpinDownStatus,
     cmd_request_control,
     cmd_set_simulation,
@@ -38,7 +38,6 @@ from smart_trainer.ble.parsers import (
     parse_indoor_bike_data,
     parse_machine_status,
     parse_spin_down_targets,
-    result_text,
 )
 from smart_trainer.core.state import Reading, Role
 

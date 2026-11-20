@@ -21,18 +21,16 @@ from smart_trainer.ble.device import (
     ProgressCallback,
     register,
 )
-from smart_trainer.ble.parsers import (
+from smart_trainer.ble.parsers.control import ControlResponse, ResultCode, result_text
+from smart_trainer.ble.parsers.cycling_power import (
     CadenceCalculator,
-    ControlResponse,
     CpOp,
-    ResultCode,
     cmd_start_offset_compensation,
     format_offset,
     parse_cp_control_response,
     parse_cp_feature,
     parse_cycling_power,
     parse_offset,
-    result_text,
 )
 from smart_trainer.core.state import Reading, Role
 
