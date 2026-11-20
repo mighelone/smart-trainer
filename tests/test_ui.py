@@ -4,7 +4,7 @@ import asyncio
 import sys
 
 import pytest
-from nicegui import ui
+from nicegui import app, ui
 from nicegui.testing import User
 
 from smart_trainer.ble import fake
@@ -13,6 +13,8 @@ from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import ConnState, Role
+from smart_trainer.ui.context import AppContext
+from smart_trainer.ui.window import MINI_SIZE
 
 pytestmark = pytest.mark.nicegui_main_file("tests/ui_main.py")
 
@@ -56,7 +58,7 @@ async def context(pages, tmp_path):
     e.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
     e.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
     e.devices.add(fake.FakeHeartRate(), [Role.HR])
-    ctx = pages.AppContext(engine=e, settings=settings, fake=True)
+    ctx = AppContext(engine=e, settings=settings, fake=True)
     pages.register_pages(ctx)
     async with e:
         await asyncio.sleep(0.4)  # let the fake devices connect
@@ -105,11 +107,11 @@ async def test_mini_start_and_pause(user: User, engine):
 
 async def test_mini_native_window(user: User, engine, pages, monkeypatch):
     w = FakeWindow()
-    monkeypatch.setattr(pages.app.native, "main_window", w)  # the app of this simulation
+    monkeypatch.setattr(app.native, "main_window", w)  # the app of this simulation
     await user.open("/")
     user.find(marker="mini").click()
     await user.should_see(marker="mini-expand", retries=20)
-    assert w.on_top and w.size == pages.MINI_SIZE
+    assert w.on_top and w.size == MINI_SIZE
     user.find(marker="mini-expand").click()
     await user.should_see("Elapsed", retries=20)
     assert not w.on_top and w.size == (1400, 900) and w.position == (50, 60)
@@ -365,7 +367,7 @@ async def test_start_rides_the_selected_workout(user: User, engine):
 
 
 async def test_strava_callback_route_is_registered(user: User, context, pages):
-    paths = {getattr(route, "path", None) for route in pages.app.routes}
+    paths = {getattr(route, "path", None) for route in app.routes}
     assert pages.connections.STRAVA_CALLBACK in paths
 
 

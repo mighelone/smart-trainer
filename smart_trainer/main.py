@@ -19,7 +19,9 @@ from smart_trainer.core.state import Role
 from smart_trainer.sync import registry
 from smart_trainer.sync.base import Capability
 from smart_trainer.ui import connections
-from smart_trainer.ui.pages import FULL_SIZE, MINI_SIZE, AppContext, MiniWindow, register_pages
+from smart_trainer.ui.context import AppContext
+from smart_trainer.ui.pages import register_pages
+from smart_trainer.ui.window import FULL_SIZE, MINI_SIZE, MiniWindow
 
 log = logging.getLogger("smart_trainer")
 _background: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected

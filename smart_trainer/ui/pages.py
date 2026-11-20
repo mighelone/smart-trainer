@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any
 
-from nicegui import app, ui
+from nicegui import ui
 
 from smart_trainer.ble.device import (
     DRIVERS,
@@ -34,6 +33,7 @@ from smart_trainer.core.workout import Workout, WorkoutRunner, parse_zwo
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.ui import connections
 from smart_trainer.ui.connections import connection_card
+from smart_trainer.ui.context import AppContext
 from smart_trainer.ui.theme import apply_theme
 from smart_trainer.ui.widgets import (
     CuePlayer,
@@ -54,9 +54,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-
-MINI_SIZE = (1000, 210)  # native window size of the mini overlay (incl. title bar)
-FULL_SIZE = (1280, 860)  # size restored when the app was started in mini mode
 
 DOT_COLOR = {
     ConnState.CONNECTED: "#22c55e",
@@ -157,100 +154,6 @@ class DeviceChips:
             color, tip = self.describe(role, self.e.devices.device_for(role))
             self._dots[role].style(replace=f"background: {color}")
             self._tips[role].set_text(tip)
-
-
-# ============================================================ WINDOW MODES
-class NativeWindow(Protocol):
-    """The part of NiceGUI's native ``WindowProxy`` used here.
-
-    NiceGUI falls back to an empty ``WindowProxy`` class when pywebview is missing, which hides
-    these methods from type checkers.
-    """
-
-    async def get_size(self) -> tuple[int, int]: ...
-    async def get_position(self) -> tuple[int, int]: ...
-    def set_always_on_top(self, on_top: bool) -> None: ...
-    def resize(self, width: int, height: int) -> None: ...
-    def move(self, x: int, y: int) -> None: ...
-
-
-def native_window() -> NativeWindow | None:
-    """The native desktop window, or ``None`` when running in a browser.
-
-    Returns:
-        NativeWindow | None: The window proxy.
-    """
-    return cast("NativeWindow | None", app.native.main_window)
-
-
-class MiniWindow:
-    """Switches between the full app and the mini overlay, and remembers the full window.
-
-    Attributes:
-        start_mini (bool): Open the mini overlay on the first visit (``--mini``).
-    """
-
-    def __init__(self, start_mini: bool = False) -> None:
-        """Create the switcher.
-
-        Args:
-            start_mini (bool): Open the mini overlay on the first visit.
-        """
-        self.start_mini = start_mini
-        self._full_geometry: tuple[tuple[int, int], tuple[int, int]] | None = None
-
-    def take_start_request(self) -> bool:
-        """Whether to open the mini overlay now; answers ``True`` only once.
-
-        Returns:
-            bool: ``True`` on the first call after starting with ``--mini``.
-        """
-        start, self.start_mini = self.start_mini, False
-        return start
-
-    async def enter(self) -> None:
-        """Switch to the mini overlay: small, always-on-top window (native) and /mini."""
-        w = native_window()
-        if w is not None:
-            self._full_geometry = (await w.get_size(), await w.get_position())
-            w.set_always_on_top(True)
-            w.resize(*MINI_SIZE)
-        ui.navigate.to("/mini")
-
-    def restore_full(self) -> None:
-        """Restore the normal window: not on top, previous size and position (native only)."""
-        w = native_window()
-        if w is None:
-            return
-        w.set_always_on_top(False)
-        if self._full_geometry:
-            (width, height), (x, y) = self._full_geometry
-            w.resize(width, height)
-            w.move(x, y)
-        else:
-            w.resize(*FULL_SIZE)
-
-    def exit(self) -> None:
-        """Leave the mini overlay and go back to the full ride page."""
-        self.restore_full()
-        ui.navigate.to("/")
-
-
-@dataclass(kw_only=True, eq=False)
-class AppContext:
-    """The objects the pages are built with, wired once by ``main.run``.
-
-    Attributes:
-        engine (Engine): The application engine.
-        settings (Settings): User settings (the same object the engine uses).
-        window (MiniWindow): Full app / mini overlay switcher.
-        fake (bool): Whether the app runs with simulated devices.
-    """
-
-    engine: Engine
-    settings: Settings
-    window: MiniWindow = field(default_factory=MiniWindow)
-    fake: bool = False
 
 
 def start_ride(ride: Ride) -> None:
