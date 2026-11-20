@@ -103,7 +103,7 @@ class Engine:
         """
         messages: deque[str] = deque(maxlen=20)
         selector = SourceSelector()
-        controller = TrainerController(settings.power_match)
+        controller = TrainerController(settings.power_match, settings.erg_spiral_guard)
         devices = DeviceHub(
             settings, on_reading=selector.on_reading, on_change=controller.configure
         )

@@ -31,6 +31,7 @@ class FakeWorld:
     Attributes:
         true_power (float): Rider's true power in watts.
         cadence (float): Current cadence in rpm.
+        cadence_base (float): Cadence the rider holds (a little noise is added), in rpm.
         trainer_bias (float): Factor by which the fake trainer over-reads power.
         tick_s (float): Simulation tick interval in seconds.
         hr (float): Current heart rate in bpm.
@@ -47,6 +48,7 @@ class FakeWorld:
         """
         self.true_power = 120.0
         self.cadence = 90.0
+        self.cadence_base = 90.0
         self.trainer_bias = trainer_bias
         self.tick_s = tick_s
         self.hr = 95.0
@@ -213,7 +215,7 @@ class FakeTrainer(_FakeBase, ControllableTrainer, Calibratable):
         else:
             goal = max(40.0, 150 + 30 * self.value)
         w.true_power += (goal - w.true_power) * 0.5
-        w.cadence = 90 + random.uniform(-2, 2)
+        w.cadence = w.cadence_base + random.uniform(-2, 2)
         measured = w.true_power * w.trainer_bias + random.uniform(-3, 3)
         speed = 3.6 * (max(w.true_power, 0) / 0.9) ** (1 / 3) * 1.0
         self.emit(Reading(self.id, power=round(measured), cadence=w.cadence, speed_kmh=speed))
