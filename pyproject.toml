@@ -81,7 +81,7 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-fail_under = 60
+fail_under = 72  # never lower it; raise it as coverage grows, towards 80
 
 [tool.ruff]
 line-length = 100
@@ -93,6 +93,8 @@ select = [
     "SIM",  # flake8-simplify (catches overly verbose logic)
     "C90",  # McCabe cyclomatic complexity
     "PLR",  # Pylint refactor & structural limits
+    "ERA",  # no commented-out code
+    "TD",   # TODOs must be written TODO(#N): … with an open issue
 ]
 ignore = ["E731"]
 
