@@ -87,7 +87,8 @@ Enforced by tools (don't repeat them here, change the config):
 - pyrefly type checking.
 
 Conventions:
-- Google-style docstrings with `Args:` / `Returns:` and types, on every function and class.
+- Google-style docstrings with `Args:` / `Returns:` and types, on every function and class
+  (ruff's `D` rules check public ones and every `Args:` list).
 - Size: split a module past ~400 lines and a function past ~40 lines of code (its docstring
   doesn't count). A long function is usually several steps that want their own names.
 - Use a `Protocol` to define the contract when a class has more than one implementation (a
@@ -108,7 +109,7 @@ Conventions:
 - Update or delete a comment in the same change that makes it wrong.
 
 Errors and logging:
-- Every module logs through `log = logging.getLogger(__name__)`; no `print`.
+- Every module that logs does it through `log = logging.getLogger(__name__)`; no `print`.
 - A ride must never stop because of a recoverable failure (a BLE command, an upload, a sync):
   catch it at the boundary where it happens, log a warning with the reason, and carry on.
 - Catch the narrowest exception you can handle. A broad `except Exception` is allowed only at
@@ -135,7 +136,7 @@ NiceGUI:
 
 - `uv run pytest` must pass; every change comes with tests.
 - Coverage must not go down: CI fails under `fail_under` in `pyproject.toml`. Raise it as
-  coverage grows, towards 80 %.
+  coverage grows.
 - UI tests use NiceGUI's simulated `User` (`tests/test_ui.py`); BLE is simulated with
   `smart_trainer/ble/fake.py`.
 - A bug fix comes with a test that fails before the fix and passes after.

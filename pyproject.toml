@@ -103,12 +103,16 @@ select = [
     "PLR",  # Pylint refactor & structural limits
     "ERA",  # no commented-out code
     "TD",   # TODOs must be written TODO(#N): … with an open issue
+    "D",    # docstrings (Google style), including their Args:
 ]
 ignore = ["E731"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PLR2004"]
+"tests/**" = ["PLR2004", "D"]
 "smart_trainer/ble/parsers/*.py" = ["PLR2004"]  # payload-length checks / byte offsets
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

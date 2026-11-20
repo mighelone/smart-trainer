@@ -51,6 +51,7 @@ async def _test(conn: Connection, **kw) -> None:
     try:
         ui.notify(f"Connected as {await conn.test(**kw)}", type="positive")
     except Exception as exc:
+        log.warning("%s connection test failed: %s", conn.name, exc)
         ui.notify(str(exc), type="negative")
 
 

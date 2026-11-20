@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -11,6 +12,8 @@ from pathlib import Path
 
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Workout
+
+log = logging.getLogger(__name__)
 
 UPLOADS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS uploads (
@@ -131,8 +134,12 @@ def _connect(path: Path) -> sqlite3.Connection:
         sqlite3.Connection: The open connection.
     """
     con = sqlite3.connect(path, isolation_level=None)  # autocommit; we wrap writes explicitly
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA synchronous=NORMAL")
+    try:
+        con.execute("PRAGMA journal_mode=WAL")  # fails first on a file that isn't a database
+        con.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.Error:
+        con.close()
+        raise
     con.row_factory = sqlite3.Row
     return con
 
@@ -270,7 +277,11 @@ class Recorder:
         self.con.execute(f"UPDATE session SET {sets} WHERE id=1", (status, *fields.values()))
 
     def set_upload(
-        self, conn_id: str, remote_id: str | None = None, error: str | None = None
+        self,
+        conn_id: str,
+        remote_id: str | None = None,
+        error: str | None = None,
+        now: float | None = None,
     ) -> None:
         """Record the outcome of an upload to a connection.
 
@@ -278,12 +289,13 @@ class Recorder:
             conn_id (str): Connection id.
             remote_id (str | None): Activity id if the upload succeeded.
             error (str | None): Error message if it failed.
+            now (float | None): Unix time of the outcome; defaults to ``time.time()``.
         """
         self.con.executescript(UPLOADS_SCHEMA)  # sessions recorded before uploads existed
         self.con.execute(
             "INSERT OR REPLACE INTO uploads (connection, remote_id, error, updated_at) "
             "VALUES (?, ?, ?, ?)",
-            (conn_id, remote_id, error, time.time()),
+            (conn_id, remote_id, error, now or time.time()),
         )
 
     def close(self) -> None:
@@ -375,8 +387,8 @@ def list_sessions(directory: Path) -> list[SessionInfo]:
     for p in sorted(directory.glob("session-*.sqlite"), reverse=True):
         try:
             out.append(read_info(p))
-        except Exception:
-            continue
+        except Exception as exc:
+            log.warning("skipping unreadable session %s: %s", p.name, exc)
     return out
 
 

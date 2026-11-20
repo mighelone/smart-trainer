@@ -98,9 +98,10 @@ class SessionStore:
                 key = _stat_key(p)
                 hit = cache.get(p)
                 info = hit[1] if hit and hit[0] == key else read_info(p)
-            except Exception:
+            except Exception as exc:  # unreadable, or moved away meanwhile
+                log.warning("skipping unreadable session %s: %s", p.name, exc)
                 cache.pop(p, None)
-                continue  # unreadable, or moved away meanwhile
+                continue
             cache[p] = (key, info)
             out.append(info)
         self._cache = cache  # replaced, never mutated: safe across worker threads

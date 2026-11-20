@@ -1,5 +1,6 @@
-"""Cycling Power Service parsers and commands: measurement, cadence from crank
-revolutions, offset compensation and features.
+"""Cycling Power Service parsers and commands.
+
+Measurement, cadence from crank revolutions, offset compensation and features.
 
 Pure functions, free of side effects, so they can be unit tested with captured payloads.
 """

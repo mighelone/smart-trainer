@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 
 from nicegui import ui
@@ -14,6 +15,8 @@ from smart_trainer.sync.base import Capability
 from smart_trainer.sync.service import SyncService
 from smart_trainer.ui.widgets.charts import workout_chart
 from smart_trainer.ui.widgets.text import fmt_time
+
+log = logging.getLogger(__name__)
 
 
 class WorkoutsPage:
@@ -110,6 +113,7 @@ class WorkoutsPage:
         try:
             wo = parse_zwo(await ev.file.text())
         except Exception as exc:
+            log.warning("invalid .zwo file %s: %s", ev.file.name, exc)
             ui.notify(f"Invalid .zwo file: {exc}", type="negative")
             return
         self.choose(wo)
@@ -136,6 +140,7 @@ class WorkoutsPage:
                     self.settings.power_zones,
                 )
             except Exception as exc:
+                log.warning("could not load workouts from %s: %s", conn.name, exc)
                 errors.append(f"Could not load workouts from {conn.name}: {exc}")
         planned.sort(key=lambda p: p.day)
         text = (
