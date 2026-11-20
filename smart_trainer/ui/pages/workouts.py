@@ -12,7 +12,8 @@ from smart_trainer.core.ride import Ride
 from smart_trainer.core.workout import Workout, parse_zwo
 from smart_trainer.sync.base import Capability
 from smart_trainer.sync.service import SyncService
-from smart_trainer.ui.widgets import fmt_time, workout_chart
+from smart_trainer.ui.widgets.charts import workout_chart
+from smart_trainer.ui.widgets.text import fmt_time
 
 
 class WorkoutsPage:

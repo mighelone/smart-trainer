@@ -9,7 +9,9 @@ from smart_trainer.core.ride import RideState
 from smart_trainer.ui.context import LiveRide
 from smart_trainer.ui.pages.live import ride_status, start_ride, update_main_tiles
 from smart_trainer.ui.theme import apply_theme
-from smart_trainer.ui.widgets import CuePlayer, Tile, fmt_time, step_title
+from smart_trainer.ui.widgets.cues import CuePlayer
+from smart_trainer.ui.widgets.text import fmt_time, step_title
+from smart_trainer.ui.widgets.tiles import Tile
 from smart_trainer.ui.window import MiniWindow
 
 

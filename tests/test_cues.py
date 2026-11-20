@@ -11,7 +11,8 @@ from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import CUE_LEAD_S
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Step, Workout
-from smart_trainer.ui.widgets import BEEP_JS, next_step_text
+from smart_trainer.ui.widgets.cues import BEEP_JS
+from smart_trainer.ui.widgets.text import next_step_text
 
 T0 = 1_700_000_000
 RIDING = Snapshot(power=200, cadence=90, hr=140)

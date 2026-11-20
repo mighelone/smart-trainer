@@ -14,8 +14,8 @@ from smart_trainer.core.engine import Engine
 from smart_trainer.core.history import History, HistoryPoint
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Step, Workout
-from smart_trainer.ui import widgets
-from smart_trainer.ui.widgets import LiveChart
+from smart_trainer.ui.widgets import charts
+from smart_trainer.ui.widgets.charts import LiveChart
 
 T0 = 1_700_000_000
 RIDING = Snapshot(power=200, cadence=90, hr=140)
@@ -146,7 +146,7 @@ def test_live_chart_free_ride_window_and_trim():
 
 def test_power_hr_skips_missing_values():
     points = [HistoryPoint(1, None, None, None, None), HistoryPoint(2.4, 180.0, 0, 90, None)]
-    assert widgets._power_hr(points) == ([[2, 180.0]], [])
+    assert charts._power_hr(points) == ([[2, 180.0]], [])
 
 
 NODE_HARNESS = """
