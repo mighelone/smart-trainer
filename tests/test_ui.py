@@ -210,7 +210,7 @@ async def test_interval_cue_beeps_and_shows_the_next_step(
     from smart_trainer.core.workout import Step, Workout
 
     pages.S.settings.interval_cues = enabled
-    pages.S.selected = Workout("Cue", [Step(6, 0.75), Step(6, 1.0, text="Push")])
+    engine.ride.select(Workout("Cue", [Step(6, 0.75), Step(6, 1.0, text="Push")]))
     await user.open("/")
     scripts = _record_scripts(user, monkeypatch)
     user.find("Start").click()
@@ -262,7 +262,7 @@ def _cadence_workout():
 
 
 async def test_ride_page_shows_cadence_targets(user: User, engine, pages):
-    pages.S.selected = _cadence_workout()  # warmup 85 rpm, then 100 / 70 rpm intervals
+    engine.ride.select(_cadence_workout())  # warmup 85 rpm, then 100 / 70 rpm intervals
     await user.open("/")
     user.find("Start").click()
     await user.should_see("Warmup · 85 rpm", retries=20)  # step card
@@ -273,7 +273,7 @@ async def test_ride_page_shows_cadence_targets(user: User, engine, pages):
 
 
 async def test_cadence_alert_on_ride_and_mini(user: User, engine, pages):
-    pages.S.selected = _cadence_workout()
+    engine.ride.select(_cadence_workout())
     await user.open("/")
     user.find("Start").click()
     engine.ride.skip_step()
@@ -294,7 +294,7 @@ async def test_cadence_alert_on_ride_and_mini(user: User, engine, pages):
 async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeypatch):
     from smart_trainer.core.workout import Step, Workout
 
-    pages.S.selected = Workout("ERG", [Step(600, 1.0)])
+    engine.ride.select(Workout("ERG", [Step(600, 1.0)]))
     await user.open("/")
     user.find("Start").click()
     await asyncio.sleep(0.2)
@@ -341,3 +341,17 @@ async def test_settings_save_updates_profile_and_power_matching(user: User, engi
     await user.should_see("Settings saved")
     assert settings.ftp == 265
     assert power_match.max_offset_w == 45  # the controller sees the change right away
+
+
+async def test_start_rides_the_selected_workout(user: User, engine):
+    from smart_trainer.core.workout import Step, Workout
+
+    workout = Workout("Picked", [Step(600, 0.6)])
+    engine.ride.select(workout)
+    await user.open("/workouts")
+    await user.should_see("Selected: Picked")
+    await user.open("/")
+    await user.should_see("Picked")
+    user.find("Start").click()
+    await user.should_see("Started: Picked")
+    assert engine.ride.runner and engine.ride.runner.workout is workout
