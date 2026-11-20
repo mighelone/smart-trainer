@@ -13,7 +13,7 @@ from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import ConnState, Role
-from smart_trainer.ui.context import AppContext
+from smart_trainer.ui.context import AppContext, LiveRide
 from smart_trainer.ui.window import MINI_SIZE
 
 pytestmark = pytest.mark.nicegui_main_file("tests/ui_main.py")
@@ -309,7 +309,7 @@ async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeyp
     await asyncio.sleep(0.2)
     monkeypatch.setattr(type(engine.controller), "erg_released", property(lambda self: True))
     monkeypatch.setattr(engine.ride, "auto_paused", False)
-    assert "ERG released: spin up to 70 rpm" in pages.ride_status(engine)
+    assert "ERG released: spin up to 70 rpm" in pages.ride_status(LiveRide.of(engine))
     await user.should_see("ERG released: spin up to 70 rpm", retries=20)
 
 
@@ -377,3 +377,13 @@ async def test_strava_callback_rejects_an_unknown_request(user: User, context, p
     )
     assert response.status_code == 400
     assert "Strava connection failed" in bytes(response.body).decode()
+
+
+async def test_live_ride_reads_the_latest_snapshot(tmp_path):
+    settings = Settings(auto_upload=False)
+    settings.readonly = True
+    e = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
+    live = LiveRide.of(e)
+    before = live.snapshot()
+    await e.tick(now_wall=1_700_000_000, now_mono=1.0)  # publishes a new snapshot
+    assert live.snapshot() is e.snapshot and live.snapshot() is not before
