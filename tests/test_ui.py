@@ -13,7 +13,10 @@ from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import ConnState, Role
+from smart_trainer.ui import connections
 from smart_trainer.ui.context import AppContext, LiveRide
+from smart_trainer.ui.pages.history import HistoryPage
+from smart_trainer.ui.pages.live import ride_status
 from smart_trainer.ui.window import MINI_SIZE
 
 pytestmark = pytest.mark.nicegui_main_file("tests/ui_main.py")
@@ -128,7 +131,7 @@ async def test_history_lists_sessions_and_loads_more(user: User, engine, pages, 
     from smart_trainer.core.recorder import Recorder
     from smart_trainer.core.state import Snapshot
 
-    monkeypatch.setattr(pages.HistoryPage, "PAGE_SIZE", 2)
+    monkeypatch.setattr(HistoryPage, "PAGE_SIZE", 2)
     for i in range(3):
         now = 1_700_000_000 + i * 3600
         rec = Recorder.create(engine.store.directory, f"Ride {i}", 200, None, now=now)
@@ -150,7 +153,7 @@ async def test_ride_chart_gets_live_points(user: User, engine, pages):
     for _ in range(40):  # the engine ticks at 1 Hz, the chart refreshes every second
         await asyncio.sleep(0.1)
         assert user.client is not None
-        charts = [el for el in user.client.elements.values() if isinstance(el, pages.ui.echart)]
+        charts = [el for el in user.client.elements.values() if isinstance(el, ui.echart)]
         if charts and len(charts[0].options["series"][1]["data"]) >= 2:  # redraw + append
             break
     else:
@@ -309,7 +312,7 @@ async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeyp
     await asyncio.sleep(0.2)
     monkeypatch.setattr(type(engine.controller), "erg_released", property(lambda self: True))
     monkeypatch.setattr(engine.ride, "auto_paused", False)
-    assert "ERG released: spin up to 70 rpm" in pages.ride_status(LiveRide.of(engine))
+    assert "ERG released: spin up to 70 rpm" in ride_status(LiveRide.of(engine))
     await user.should_see("ERG released: spin up to 70 rpm", retries=20)
 
 
@@ -368,11 +371,11 @@ async def test_start_rides_the_selected_workout(user: User, engine):
 
 async def test_strava_callback_route_is_registered(user: User, context, pages):
     paths = {getattr(route, "path", None) for route in app.routes}
-    assert pages.connections.STRAVA_CALLBACK in paths
+    assert connections.STRAVA_CALLBACK in paths
 
 
 async def test_strava_callback_rejects_an_unknown_request(user: User, context, pages):
-    response = await pages.connections.finish_strava_authorization(
+    response = await connections.finish_strava_authorization(
         context.settings, "never-sent", "code", "", "activity:write"
     )
     assert response.status_code == 400

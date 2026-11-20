@@ -1,0 +1,399 @@
+"""Ride page: live metrics, workout chart, ride and manual controls, crash recovery."""
+
+from __future__ import annotations
+
+from collections import deque
+
+from nicegui import ui
+
+from smart_trainer.config import Settings
+from smart_trainer.core.control import Mode
+from smart_trainer.core.ride import Ride, RideState
+from smart_trainer.core.sessions import SessionStore
+from smart_trainer.core.workout import WorkoutRunner
+from smart_trainer.ui.context import AppContext, LiveRide
+from smart_trainer.ui.pages.frame import frame
+from smart_trainer.ui.pages.live import ride_status, start_ride, update_main_tiles
+from smart_trainer.ui.widgets import (
+    CuePlayer,
+    LiveChart,
+    Tile,
+    fmt,
+    fmt_time,
+    next_step_text,
+    step_title,
+    workout_chart,
+)
+
+MANUAL_UNIT = {"resistance": "%", "slope": "% grade", "erg": " W"}
+# Slider range per manual mode: resistance in %, slope in % grade, ERG in watts
+MANUAL_SLIDER = {
+    Mode.RESISTANCE: "min=0 max=100 step=1",
+    Mode.SLOPE: "min=-10 max=20 step=0.5",
+    Mode.ERG: "min=50 max=600 step=5",
+}
+
+
+class RidePage:
+    """Ride page widgets: live metrics, workout chart and ride controls.
+
+    Attributes:
+        live_ride (LiveRide): The ride state shown and controlled.
+        ride (Ride): The ride.
+        controller (TrainerController): Trainer control (manual mode).
+        devices (DeviceHub): Devices and their roles (power source).
+        messages (deque[str]): Status messages from the core, shown after finishing.
+        settings (Settings): User settings (FTP, zones, cues).
+        ftp (int): FTP used to draw the workout chart.
+    """
+
+    def __init__(self, live: LiveRide, messages: deque[str], settings: Settings) -> None:
+        """Build the page.
+
+        Args:
+            live (LiveRide): The ride state shown and controlled.
+            messages (deque[str]): Status messages from the core.
+            settings (Settings): User settings.
+        """
+        self.live_ride = live
+        self.ride, self.controller, self.devices = live.ride, live.controller, live.devices
+        self.messages = messages
+        self.settings = settings
+        self.ftp = settings.ftp
+        self.chart = None
+        self.live: LiveChart | None = None
+        self.chart_workout: object = object()
+        self.ticks = 0
+        with ui.column().classes("page"):
+            self.warn = ui.label("").classes("status-bar")
+            self._build_tiles()
+            self._build_step_card()
+            self.holder = ui.card().classes("w-full p-2")
+            self._build_controls()
+            self._build_manual()
+        self.cues = CuePlayer(self.ride, lambda: settings.interval_cues)
+
+    # ------------------------------------------------------------- build
+    def _build_tiles(self) -> None:
+        """Build the two rows of metric tiles."""
+        with ui.element("div").classes("metric-grid"):
+            self.t_power = Tile("Power · 3s", "W", icon="bolt", size="lg", accent="#facc15")
+            self.t_target = Tile("Target", "W", icon="adjust", size="lg", accent="#4f8cff")
+            self.t_hr = Tile("Heart rate", "bpm", icon="favorite", size="lg", accent="#f43f5e")
+            self.t_cad = Tile("Cadence", "rpm", icon="autorenew", size="lg", accent="#a78bfa")
+        with ui.element("div").classes("metric-grid"):
+            self.t_time = Tile("Elapsed", icon="schedule")
+            self.t_step = Tile("Interval left", icon="timer")
+            self.t_speed = Tile("Speed", "km/h", icon="speed")
+            self.t_bal = Tile("Balance", "L/R", icon="balance")
+
+    def _build_step_card(self) -> None:
+        """Build the current/next interval card."""
+        with ui.card().classes("w-full panel gap-2") as self.step_card:
+            with ui.row().classes("w-full items-baseline justify-between no-wrap gap-4"):
+                self.step_label = ui.label("").classes("step-title")
+                self.next_label = ui.label("").classes("step-next text-right")
+            self.step_bar = (
+                ui.linear_progress(value=0, show_value=False)
+                .props("rounded size=6px color=primary instant-feedback")
+                .classes("step-progress")
+            )
+
+    def _build_controls(self) -> None:
+        """Build the ride controls: start/pause/skip/lap, intensity, ERG and finish."""
+        with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-3 w-full"):
+            self.btn_start = ui.button(
+                "Start", icon="play_arrow", on_click=lambda: start_ride(self.ride)
+            ).props("color=positive size=lg padding='8px 28px'")
+            self.btn_pause = ui.button(
+                "Pause", icon="pause", on_click=lambda: self.ride.toggle_pause()
+            ).props("color=primary size=lg padding='8px 24px'")
+            self.btn_skip = ui.button(
+                "Skip", icon="skip_next", on_click=lambda: self.ride.skip_step()
+            ).props("color=secondary")
+            self.btn_lap = ui.button("Lap", icon="flag", on_click=lambda: self.ride.lap()).props(
+                "color=secondary"
+            )
+            with ui.row().classes("items-center gap-1 ml-2") as self.intensity_box:
+                ui.label("Intensity").classes("field-label mr-1")
+                ui.button(icon="remove", on_click=lambda: self.ride.change_intensity(-0.05)).props(
+                    "color=secondary round dense"
+                ).tooltip("Intensity -5%")
+                self.intensity = ui.label("100%").classes("control-value")
+                ui.button(icon="add", on_click=lambda: self.ride.change_intensity(0.05)).props(
+                    "color=secondary round dense"
+                ).tooltip("Intensity +5%")
+            self.erg = ui.switch(
+                "ERG", value=self.ride.erg_enabled, on_change=lambda ev: self.ride.set_erg(ev.value)
+            )
+            ui.space()
+            self.btn_finish = ui.button("Finish", icon="stop", on_click=self.confirm_finish).props(
+                "color=negative outline size=lg padding='8px 24px'"
+            )
+
+    def _build_manual(self) -> None:
+        """Build the manual control (mode and slider) and the power source toggle."""
+        with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-6 w-full"):
+            with ui.row().classes("items-center gap-4 grow no-wrap") as self.manual_box:
+                ui.label("Manual").classes("field-label")
+                self.mode = (
+                    ui.toggle(
+                        {"resistance": "Resistance", "slope": "Slope", "erg": "Fixed ERG"},
+                        value=self.controller.mode.value
+                        if self.ride.runner is None
+                        else "resistance",
+                        on_change=lambda ev: self.set_manual_mode(ev.value),
+                    )
+                    .classes("shrink-0")
+                    .mark("manual-mode")
+                )
+                self.slider = (
+                    ui.slider(
+                        min=0,
+                        max=100,
+                        step=1,
+                        value=self.controller.resistance_pct,
+                        on_change=lambda ev: self.set_manual_value(ev.value),
+                    )
+                    .classes("grow min-w-[120px]")
+                    .mark("manual-slider")
+                )
+                self.slider_label = ui.label("").classes("control-value w-24")
+            with ui.row().classes("items-center gap-3 shrink-0"):
+                ui.label("Power source").classes("field-label")
+                ui.toggle(
+                    {"pedals": "Pedals", "trainer": "Trainer"},
+                    value=self.settings.power_source,
+                    on_change=lambda ev: self.devices.set_power_source(ev.value),
+                )
+
+    # ---------------------------------------------------------- handlers
+    def set_manual_mode(self, m: str) -> None:
+        """Switch the manual control mode and adapt the slider range.
+
+        Args:
+            m (str): Mode value (``"resistance"``, ``"slope"`` or ``"erg"``).
+        """
+        controller, mode = self.controller, Mode(m)
+        controller.set_target(mode, controller.target_for(mode))
+        self.slider.props(MANUAL_SLIDER[mode])
+        self.slider.value = controller.target_for(mode)
+
+    def set_manual_value(self, v: float) -> None:
+        """Apply the slider value to the current manual mode.
+
+        Args:
+            v (float): Slider value (percent, grade or watts depending on mode).
+        """
+        controller = self.controller
+        controller.set_target(controller.mode, v)
+
+    async def do_finish(self, dialog: ui.dialog, upload: bool) -> None:
+        """Finish the ride and notify the result.
+
+        Args:
+            dialog (ui.dialog): Confirmation dialog to close.
+            upload (bool): Whether to upload the ride to the connected services.
+        """
+        dialog.close()
+        n = ui.notification("Saving session…", spinner=True, timeout=None)
+        seen = len(self.messages)
+        fit = await self.ride.finish(upload=upload)
+        n.dismiss()
+        ui.notify(f"Saved {fit.name}" if fit else "Nothing recorded", type="positive")
+        for m in list(self.messages)[seen:]:
+            ui.notify(m)
+
+    def confirm_finish(self) -> None:
+        """Ask the rider how to finish the session."""
+        with ui.dialog() as d, ui.card():
+            ui.label("Finish this session?").classes("text-lg")
+            with ui.row():
+                ui.button(
+                    "Save & upload", icon="cloud_upload", on_click=lambda: self.do_finish(d, True)
+                ).props("color=positive")
+                ui.button("Save only", icon="save", on_click=lambda: self.do_finish(d, False))
+                ui.button("Keep riding", on_click=d.close).props("flat")
+        d.open()
+
+    # ----------------------------------------------------------- refresh
+    def ensure_chart(self) -> None:
+        """Recreate the chart when the displayed workout changes."""
+        wo = (
+            self.ride.runner.workout
+            if self.ride.runner
+            else (self.ride.next_workout if self.ride.state == RideState.IDLE else None)
+        )
+        if self.chart_workout is wo:
+            return
+        self.holder.clear()
+        with self.holder:
+            self.chart = workout_chart(wo, self.ftp)
+        self.live = LiveChart(self.chart, self.ride.history, free_ride=wo is None)
+        self.chart_workout = wo
+
+    def refresh(self) -> None:
+        """Update tiles, labels, buttons and controls from the engine state."""
+        self.ensure_chart()
+        snap = self.live_ride.snapshot()
+        riding = self.ride.state == RideState.RIDING
+        update_main_tiles(
+            self.live_ride, self.settings, self.t_power, self.t_target, self.t_hr, self.t_cad
+        )
+        self.t_speed.set(fmt(snap.speed_kmh, 1))
+        self.t_bal.set(
+            f"{snap.balance_left:.0f}/{100 - snap.balance_left:.0f}" if snap.balance_left else "--"
+        )
+        r = self.ride.runner
+        if r:
+            self._show_workout_step(r)
+        else:
+            self._show_no_workout(riding)
+        status = ride_status(self.live_ride)
+        self.warn.set_text(" · ".join(status))
+        self.warn.set_visibility(bool(status))
+        self._refresh_controls(riding, r is not None)
+        self._refresh_manual(manual=not (r and self.ride.erg_enabled))
+        self.cues.check()
+
+    def _show_workout_step(self, r: WorkoutRunner) -> None:
+        """Show the elapsed time and the current/next interval of a running workout.
+
+        Args:
+            r (WorkoutRunner): The workout runner.
+        """
+        i, st, into, left = r.current()
+        self.t_time.set(fmt_time(r.elapsed), f"of {fmt_time(r.workout.duration_s)}")
+        self.t_step.set(fmt_time(left), f"step {i + 1} of {len(r.workout.steps)}")
+        self.step_label.set_text(step_title(i, st))
+        nxt = r.next_step()
+        if nxt:
+            self.next_label.set_text(f"Next · {next_step_text(nxt, r.ftp, r.intensity)}")
+        else:
+            self.next_label.set_text("Last interval")
+        self.step_bar.set_value(min(1.0, into / st.duration_s) if st.duration_s else 0)
+        self.intensity.set_text(f"{r.intensity * 100:.0f}%")
+        self.step_card.set_visibility(True)
+
+    def _show_no_workout(self, riding: bool) -> None:
+        """Show a free ride in progress, or the workout selected for the next ride.
+
+        Args:
+            riding (bool): Whether a (free) ride is in progress.
+        """
+        self.t_time.set(fmt_time(self.ride.seconds if riding else 0), "free ride" if riding else "")
+        self.t_step.set("--")
+        sel = None if riding else self.ride.next_workout
+        self.step_label.set_text(sel.name if sel else "")
+        self.next_label.set_text(
+            f"{fmt_time(sel.duration_s)} · {len(sel.steps)} steps" if sel else ""
+        )
+        self.step_bar.set_value(0)
+        self.step_card.set_visibility(sel is not None)
+
+    def _refresh_controls(self, riding: bool, workout: bool) -> None:
+        """Show the ride buttons that apply to the current state.
+
+        Args:
+            riding (bool): Whether a ride is in progress.
+            workout (bool): Whether a workout is running.
+        """
+        self.btn_start.set_visibility(not riding)
+        for b in (self.btn_pause, self.btn_finish, self.btn_lap):
+            b.set_visibility(riding)
+        self.btn_skip.set_visibility(riding and workout)
+        self.btn_pause.set_text("Resume" if self.ride.manual_pause else "Pause")
+        self.erg.set_visibility(workout)
+        self.intensity_box.set_visibility(workout)
+
+    def _refresh_manual(self, manual: bool) -> None:
+        """Update the manual control, shown unless a workout drives the trainer in ERG.
+
+        Args:
+            manual (bool): Whether the manual control is in use.
+        """
+        self.manual_box.set_visibility(manual)
+        c = self.controller
+        self.slider_label.set_text(f"{c.target_for(c.mode):g}{MANUAL_UNIT[c.mode.value]}")
+        if manual and self.mode.value != c.mode.value:
+            self.mode.value = c.mode.value
+
+    def refresh_chart(self) -> None:
+        """Send the new live power and heart-rate points to the chart."""
+        if self.live is not None:
+            self.live.sync()
+
+    def loop(self) -> None:
+        """Refresh the page, and the chart every other call."""
+        self.refresh()
+        self.ticks += 1
+        if self.ticks % 2 == 0:
+            self.refresh_chart()
+
+
+def recovery_dialog(ride: Ride, store: SessionStore) -> None:
+    """Offer to resume, finish or discard an unfinished session.
+
+    Args:
+        ride (Ride): The ride (to resume into).
+        store (SessionStore): Recorded sessions (to finish or discard).
+    """
+    if ride.state != RideState.IDLE:
+        return
+    crashed = ride.recoverable_sessions()
+    if not crashed:
+        return
+    info = crashed[0]
+    with ui.dialog().props("persistent") as d, ui.card():
+        ui.label("Unfinished session found").classes("text-xl font-bold")
+        ui.label(
+            f"{info.name}, started {info.started:%a %d %b %H:%M}, "
+            f"{fmt_time(info.elapsed_s)} recorded ({info.n_samples} samples)"
+        )
+        ui.label("The app was closed or crashed during this ride.").classes("opacity-70")
+
+        def resume():
+            """Resume the unfinished session."""
+            try:
+                ride.resume(info)
+            except RuntimeError as exc:
+                ui.notify(str(exc), type="warning")
+                return
+            d.close()
+            ui.notify("Session resumed: start pedalling")
+
+        async def finish():
+            """Finalize the unfinished session without resuming it."""
+            d.close()
+            fit = await store.finish_crashed(info)
+            ui.notify(f"Saved {fit.name if fit else 'session'}")
+
+        def discard():
+            """Move the unfinished session to the discarded folder."""
+            d.close()
+            store.discard(info)
+            ui.notify("Session moved to sessions/discarded")
+
+        with ui.row():
+            ui.button("Resume", icon="play_arrow", on_click=resume).props("color=positive")
+            ui.button("Finish & save", icon="save", on_click=finish)
+            ui.button("Discard", icon="delete", on_click=discard).props("flat color=negative")
+    d.open()
+
+
+def build_ride_page(ctx: AppContext) -> None:
+    """Ride page: live metrics, workout chart and ride controls.
+
+    Args:
+        ctx (AppContext): The app's objects.
+    """
+    e = ctx.engine
+    if ctx.window.take_start_request():
+        if not e.ride.recoverable_sessions():
+            ui.navigate.to("/mini")
+            return
+        ctx.window.restore_full()  # an unfinished session needs the full page's dialog
+    frame(ctx, "Ride")
+    page = RidePage(LiveRide.of(e), e.messages, ctx.settings)
+    recovery_dialog(e.ride, e.store)
+    ui.timer(0.5, page.loop)
