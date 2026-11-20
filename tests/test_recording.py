@@ -70,6 +70,7 @@ def test_resume_appends_and_exports_fit(tmp_path):
     rec.record(Snapshot(power=0, cadence=0), 90, 175, True, "erg", now=t0 + 300)  # paused sample
     fit = export_fit(rec, tmp_path / "out.fit")
     rec.set_status("finished")
+    rec.close()
     assert find_unfinished(tmp_path) == []
 
     records, laps, sessions, events = [], [], [], []

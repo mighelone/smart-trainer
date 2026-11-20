@@ -112,8 +112,13 @@ async def test_workout_complete_announced_once(tmp_path):
 
 @pytest.fixture
 def ride(tmp_path, settings):
-    """The ride of an engine without devices (nothing is sent to a trainer)."""
-    return Engine.from_settings(settings, sessions=tmp_path, run_loop=False).ride
+    """The ride of an engine without devices (nothing is sent to a trainer).
+
+    Closed afterwards, like the engine does on exit, so its session file is released.
+    """
+    ride = Engine.from_settings(settings, sessions=tmp_path, run_loop=False).ride
+    yield ride
+    ride.close()
 
 
 async def test_selected_workout_is_kept_until_the_ride_finishes(ride):
