@@ -49,9 +49,9 @@ Dependency rules:
 - **Derived state** (status lines, zones, alerts) is computed from the owner's state when needed,
   not stored and updated separately.
 - Pages receive the components they use (`ride`, `devices`, `store`, …) and settings through
-  their constructor, never the whole `Engine` (see Dependency injection). `register_pages` in
-  `ui/pages.py` is the only place that wires them; `AppContext` (`ui/context.py`) carries the
-  engine and settings there.
+  their constructor, never the whole `Engine` (see Dependency injection). `register_pages`
+  (`ui/pages/__init__.py`) is the only place that wires them; `AppContext` (`ui/context.py`)
+  carries the engine and settings there.
 
 ## Design: dependency injection and SOLID
 
