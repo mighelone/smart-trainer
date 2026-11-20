@@ -94,8 +94,8 @@ TRAINER_AND_PEDALS = BOTH
 
 
 def _readings(sel: SourceSelector, device: str, values: list[float], start: float, hz: float):
-    for i, v in enumerate(values):
-        sel.on_reading(Reading(device, power=v, cadence=90, ts=start + (i + 1) / hz))
+    for index, value in enumerate(values):
+        sel.on_reading(Reading(device, power=value, cadence=90, ts=start + (index + 1) / hz))
 
 
 def test_power_mean_at_4_hz_is_the_mean_of_the_second():

@@ -28,8 +28,8 @@ def test_crash_recovery_after_kill_9(tmp_path):
                        now=1_700_000_000 + i)
         os.kill(os.getpid(), signal.SIGKILL)
     """)
-    p = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent.parent)
-    assert p.returncode == -signal.SIGKILL
+    process = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent.parent)
+    assert process.returncode == -signal.SIGKILL
     unfinished = find_unfinished(tmp_path)
     assert len(unfinished) == 1
     info = unfinished[0]
@@ -40,16 +40,16 @@ def test_resume_appends_and_exports_fit(tmp_path):
     wo = parse_intervals_doc(DOC, name="Cadence", ftp=250)
     t0 = 1_700_000_000
     rec = Recorder.create(tmp_path, wo.name, 250, wo, now=t0)
-    for i in range(60):
-        if i == 30:
+    for second in range(60):
+        if second == 30:
             rec.new_lap()
         rec.record(
-            Snapshot(power=180 + i, cadence=90, hr=130, speed_kmh=30, balance_left=50),
-            i,
+            Snapshot(power=180 + second, cadence=90, hr=130, speed_kmh=30, balance_left=50),
+            second,
             175,
             False,
             "erg",
-            now=t0 + i,
+            now=t0 + second,
         )
     rec.close()  # "crash"
 
@@ -58,14 +58,14 @@ def test_resume_appends_and_exports_fit(tmp_path):
     assert info.workout.name == "Cadence" and len(info.workout.steps) == len(wo.steps)
     rec = Recorder.open(info.path)
     assert rec.lap == 1 and rec.distance_m > 0
-    for i in range(60, 90):  # resumed after a 2 minute gap
+    for second in range(60, 90):  # resumed after a 2 minute gap
         rec.record(
             Snapshot(power=200, cadence=90, hr=135, speed_kmh=30),
-            i,
+            second,
             175,
             False,
             "erg",
-            now=t0 + 120 + i,
+            now=t0 + 120 + second,
         )
     rec.record(Snapshot(power=0, cadence=0), 90, 175, True, "erg", now=t0 + 300)  # paused sample
     fit = export_fit(rec, tmp_path / "out.fit")
@@ -82,9 +82,11 @@ def test_resume_appends_and_exports_fit(tmp_path):
                 ).append(frame)
     assert len(records) == 90  # paused sample excluded
     assert len(laps) == 2
-    s = sessions[0]
-    assert s.get_value("avg_power") > 180
-    assert s.get_value("total_timer_time") < s.get_value("total_elapsed_time")  # gap not counted
+    session = sessions[0]
+    assert session.get_value("avg_power") > 180
+    assert session.get_value("total_timer_time") < session.get_value(
+        "total_elapsed_time"
+    )  # gap not counted
     assert sum(1 for e in events if e.get_value("event_type") == "start") == 2
 
 

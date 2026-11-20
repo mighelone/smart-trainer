@@ -57,19 +57,19 @@ def handler(request: httpx.Request) -> httpx.Response:
 
 
 async def test_list_and_upload(tmp_path):
-    c = IntervalsClient("secret", transport=httpx.MockTransport(handler))
-    ws = await c.list_workouts(date(2026, 11, 16), date(2026, 11, 18), ftp=250)
+    client = IntervalsClient("secret", transport=httpx.MockTransport(handler))
+    ws = await client.list_workouts(date(2026, 11, 16), date(2026, 11, 18), ftp=250)
     assert [w.name for w in ws] == ["Cadence", "No doc"]
     assert ws[0].workout.source_id == "1" and ws[1].duration_s == 600
     fit = tmp_path / "ride.fit"
     fit.write_bytes(b"FIT")
     ride = RideUpload(fit, "Ride", workout_source_id="1")
-    assert await c.upload_activity(ride) == "i123"
-    await c.aclose()
+    assert await client.upload_activity(ride) == "i123"
+    await client.aclose()
 
 
 async def test_bad_key():
-    c = IntervalsClient("wrong", transport=httpx.MockTransport(handler))
+    client = IntervalsClient("wrong", transport=httpx.MockTransport(handler))
     with pytest.raises(IntervalsError):
-        await c.list_workouts(date(2026, 11, 16), date(2026, 11, 18), ftp=250)
-    await c.aclose()
+        await client.list_workouts(date(2026, 11, 16), date(2026, 11, 18), ftp=250)
+    await client.aclose()
