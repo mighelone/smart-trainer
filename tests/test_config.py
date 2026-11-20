@@ -3,7 +3,9 @@
 import keyring
 import pytest
 
-from smart_trainer.config import Settings, get_secret, sessions_dir, set_secret
+from smart_trainer.config import Settings, sessions_dir
+from smart_trainer.keychain import get_api_key, get_secret, set_secret
+from smart_trainer.logs import log_path
 from smart_trainer.sync.intervals import IntervalsConnection
 
 
@@ -66,6 +68,8 @@ async def test_intervals_client_can_use_a_typed_athlete_id(settings):
 def test_tests_never_touch_the_real_app_folder_or_keychain(tmp_path):
     assert Settings.path().is_relative_to(tmp_path)
     assert sessions_dir().is_relative_to(tmp_path)
+    assert log_path().is_relative_to(tmp_path)
     set_secret("strava", "refresh_token", "t0k3n")
     assert get_secret("strava", "refresh_token") == "t0k3n"
     assert type(keyring.get_keyring()).__name__ == "MemoryKeyring"
+    assert get_api_key() is None  # not even from the developer's INTERVALS_API_KEY

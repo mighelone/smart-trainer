@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from smart_trainer.config import delete_secret, get_secret, set_secret
+from smart_trainer.keychain import delete_secret, get_secret, set_secret
 from smart_trainer.sync.base import Capability, Connection, RideUpload, register
 
 log = logging.getLogger(__name__)

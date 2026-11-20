@@ -8,8 +8,8 @@ from typing import Self
 
 import httpx
 
-from smart_trainer.config import get_api_key, set_api_key
 from smart_trainer.core.workout import parse_intervals_doc, parse_zwo
+from smart_trainer.keychain import get_api_key, set_api_key
 from smart_trainer.sync.base import (
     AthleteProfile,
     Capability,

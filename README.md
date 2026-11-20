@@ -117,7 +117,8 @@ launch offers **Resume** (continues the workout where it stopped), **Finish & sa
 | `smart_trainer/core/` | engine (1 Hz loop), source selection, trainer control and power matching, workouts, recorder |
 | `smart_trainer/export/fit.py` | FIT activity export |
 | `smart_trainer/sync/` | connections: `base.py` (interface), `registry.py`, `intervals.py`, `strava.py` |
-| `smart_trainer/ui/` | NiceGUI pages; `connections.py` holds the connection settings cards and the OAuth callback |
+| `smart_trainer/ui/` | NiceGUI pages and widgets; `connections.py` holds the connection settings cards, `strava_auth.py` the Strava OAuth flow |
+| `smart_trainer/config.py`, `keychain.py`, `logs.py` | settings, connection secrets (keyring), logging setup |
 
 ### Adding a device
 Create a driver subclassing `BleakDevice`:
@@ -133,7 +134,7 @@ Create a module in `smart_trainer/sync/` with a `Connection` subclass:
 - set `id`, `name` and `capabilities` (`UPLOAD`, `WORKOUTS`, `PROFILE`)
 - implement `is_configured()`, `test()`, and the method of each capability: `upload_activity(ride)`,
   `list_workouts(...)` or `profile()`
-- keep non-secret options in `self.options` and secrets in the keyring with `get_secret`/`set_secret`
+- keep non-secret options in `self.options` and secrets in the keyring with `get_secret`/`set_secret` (`smart_trainer/keychain.py`)
 - decorate the class with `@register`
 
 Then import it in `sync/registry.py`. The engine, History and Workouts pages pick it up from its
