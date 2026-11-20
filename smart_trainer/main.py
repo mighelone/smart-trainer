@@ -7,6 +7,7 @@ import asyncio
 import logging
 import multiprocessing
 import sys
+from collections.abc import Sequence
 from contextlib import AsyncExitStack
 
 from nicegui import app, native, ui
@@ -87,8 +88,16 @@ async def _startup(ctx: AppContext) -> None:
         task.add_done_callback(_background.discard)
 
 
-def run() -> None:
-    """Parse command-line arguments and run the NiceGUI app."""
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse the command-line arguments.
+
+    Args:
+        argv (Sequence[str] | None): Arguments without the program name; ``None`` reads
+            ``sys.argv``.
+
+    Returns:
+        argparse.Namespace: The options; ``--mini`` turns ``native`` on.
+    """
     parser = argparse.ArgumentParser(description="Smart trainer app")
     parser.add_argument("--fake", action="store_true", help="use simulated devices")
     parser.add_argument(
@@ -112,18 +121,36 @@ def run() -> None:
         action="store_true",
         help="start as a small always-on-top overlay (implies --native)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.mini:
         args.native = True
+    return args
+
+
+def _server_port(args: argparse.Namespace) -> int:
+    """Choose the port the app's server listens on.
+
+    Args:
+        args (argparse.Namespace): The command-line options.
+
+    Returns:
+        int: ``--port`` if given, else 8080, or a free port for a native window.
+    """
+    if args.port is not None:
+        return args.port
+    # A native window doesn't need a stable URL, so avoid clashing with other apps;
+    # with --lan the iPad needs a predictable address.
+    return 8080 if args.lan or not args.native else native.find_open_port()
+
+
+def run() -> None:
+    """Parse command-line arguments and run the NiceGUI app."""
+    args = _parse_args()
+    if args.mini:
         app.native.window_args["on_top"] = True
     if log_file := setup_logging(to_file=args.native):
         log.info("logging to %s", log_file)
-
-    port = args.port
-    if port is None:
-        # A native window doesn't need a stable URL, so avoid clashing with other apps;
-        # with --lan the iPad needs a predictable address.
-        port = 8080 if args.lan or not args.native else native.find_open_port()
+    port = _server_port(args)
     # The native window runs in a child process that re-runs this function (ui.run returns
     # there right away): only the server process builds the engine and the pages.
     if multiprocessing.current_process().name == "MainProcess":
