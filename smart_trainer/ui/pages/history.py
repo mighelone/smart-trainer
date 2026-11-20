@@ -11,7 +11,7 @@ from smart_trainer.core.recorder import SessionInfo, UploadState
 from smart_trainer.core.sessions import SessionStore
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.sync.service import SyncService
-from smart_trainer.ui.widgets import fmt_time
+from smart_trainer.ui.widgets.text import fmt_time
 
 
 def upload_chip(name: str, state: UploadState | None) -> None:

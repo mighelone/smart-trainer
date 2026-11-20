@@ -9,7 +9,8 @@ from smart_trainer.core.control import SPIRAL_RESUME_RPM, Mode
 from smart_trainer.core.ride import Ride, RideState
 from smart_trainer.core.state import Role
 from smart_trainer.ui.context import LiveRide
-from smart_trainer.ui.widgets import Tile, cadence_display, fmt, hr_zone, power_zone
+from smart_trainer.ui.widgets.text import fmt
+from smart_trainer.ui.widgets.tiles import Tile, cadence_display, hr_zone, power_zone
 
 
 def start_ride(ride: Ride) -> None:

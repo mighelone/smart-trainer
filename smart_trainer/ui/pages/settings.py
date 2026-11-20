@@ -15,7 +15,7 @@ from smart_trainer.core.control import SPIRAL_RELEASE_RPM, SPIRAL_RESUME_RPM
 from smart_trainer.sync.base import Capability
 from smart_trainer.sync.service import SyncService
 from smart_trainer.ui.connections import connection_card
-from smart_trainer.ui.widgets import CuePlayer
+from smart_trainer.ui.widgets.cues import CuePlayer
 
 log = logging.getLogger(__name__)
 

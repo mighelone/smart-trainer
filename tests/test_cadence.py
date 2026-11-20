@@ -7,12 +7,8 @@ from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import CADENCE_WARN_AFTER_S
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Step, Workout
-from smart_trainer.ui.widgets import (
-    CADENCE_ALERT_COLOR,
-    cadence_display,
-    next_step_text,
-    step_title,
-)
+from smart_trainer.ui.widgets.text import next_step_text, step_title
+from smart_trainer.ui.widgets.tiles import CADENCE_ALERT_COLOR, cadence_display
 
 T0 = 1_700_000_000
 TWO_STEPS = Workout("C", [Step(60, 0.6, cadence=90), Step(60, 0.8, cadence=100), Step(30, 0.5)])

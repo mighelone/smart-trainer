@@ -7,7 +7,7 @@ from smart_trainer.core.ride import RideState
 from smart_trainer.core.workout import parse_intervals_doc, zone_mid
 from smart_trainer.sync.base import AthleteProfile, Connection
 from smart_trainer.sync.intervals import IntervalsClient, IntervalsConnection, parse_profile
-from smart_trainer.ui.widgets import hr_zone_color, zone_color
+from smart_trainer.ui.widgets.tiles import hr_zone_color, zone_color
 
 RUN = {"types": ["Run"], "ftp": None, "lthr": 170, "max_hr": 195, "hr_zones": [1, 2, 3]}
 RIDE = {

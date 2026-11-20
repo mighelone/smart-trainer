@@ -14,16 +14,10 @@ from smart_trainer.core.workout import WorkoutRunner
 from smart_trainer.ui.context import AppContext, LiveRide
 from smart_trainer.ui.pages.frame import frame
 from smart_trainer.ui.pages.live import ride_status, start_ride, update_main_tiles
-from smart_trainer.ui.widgets import (
-    CuePlayer,
-    LiveChart,
-    Tile,
-    fmt,
-    fmt_time,
-    next_step_text,
-    step_title,
-    workout_chart,
-)
+from smart_trainer.ui.widgets.charts import LiveChart, workout_chart
+from smart_trainer.ui.widgets.cues import CuePlayer
+from smart_trainer.ui.widgets.text import fmt, fmt_time, next_step_text, step_title
+from smart_trainer.ui.widgets.tiles import Tile
 
 MANUAL_UNIT = {"resistance": "%", "slope": "% grade", "erg": " W"}
 # Slider range per manual mode: resistance in %, slope in % grade, ERG in watts
