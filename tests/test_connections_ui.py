@@ -7,8 +7,8 @@ import pytest
 from nicegui import app
 from nicegui.testing import User
 
-from smart_trainer.config import get_secret, set_secret
 from smart_trainer.core.engine import Engine
+from smart_trainer.keychain import get_secret, set_secret
 from smart_trainer.sync import registry
 from smart_trainer.ui.context import AppContext
 from smart_trainer.ui.strava_auth import STRAVA_CALLBACK, StravaAuthorization

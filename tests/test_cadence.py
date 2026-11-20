@@ -3,8 +3,8 @@
 import pytest
 
 from smart_trainer.config import Settings
+from smart_trainer.core.cadence import CADENCE_WARN_AFTER_S, CadenceCheck
 from smart_trainer.core.engine import Engine
-from smart_trainer.core.ride import CADENCE_WARN_AFTER_S
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Step, Workout
 from smart_trainer.ui.widgets.text import next_step_text, step_title
@@ -95,6 +95,41 @@ def test_no_alert_while_paused(ride):
     assert _ride(ride, 3, 70) == [None] * 3
     ride.toggle_pause()
     assert _ride(ride, 4, 70) == [None] * 4  # counting again from zero
+
+
+def _check(ticks: list[tuple[int | None, float | None, int | None, bool]]) -> list:
+    """Feed 1 s ticks of (target, cadence, step, paused); return the alert after each."""
+    check = CadenceCheck()
+    alerts = []
+    for target, cadence, step, paused in ticks:
+        check.update(target, cadence, step, paused, dt=1.0)
+        alerts.append(check.alert)
+    return alerts
+
+
+@pytest.mark.parametrize(
+    ("cadence", "alert"), [(75, "low"), (105, "high"), (85, None), (95, None), (None, None)]
+)
+def test_cadence_check_alerts_after_the_delay(cadence, alert):
+    alerts = _check([(90, cadence, 0, False)] * 5)
+    assert alerts == [None] * 4 + [alert]
+
+
+@pytest.mark.parametrize(
+    ("interruption", "ticks_to_alert"),
+    [
+        ((90, 75, 1, False), 4),  # the new step's first second off target already counts
+        ((90, 75, 0, True), 5),
+        ((None, 75, 0, False), 5),
+        ((90, 90, 0, False), 5),
+    ],
+    ids=["new step", "paused", "no target", "back on target"],
+)
+def test_cadence_check_starts_again_after_an_interruption(interruption, ticks_to_alert):
+    step = interruption[2]
+    alerts = _check([(90, 75, 0, False)] * 4 + [interruption] + [(90, 75, step, False)] * 5)
+    assert alerts[4] is None
+    assert alerts[5:] == [None] * (ticks_to_alert - 1) + ["low"] * (6 - ticks_to_alert)
 
 
 def test_cadence_display():

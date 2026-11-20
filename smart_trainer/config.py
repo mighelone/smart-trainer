@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Self
 
@@ -19,8 +17,6 @@ APP_DIR = Path(
         "SMART_TRAINER_HOME", Path.home() / "Library" / "Application Support" / "SmartTrainer"
     )
 )
-KEYRING_SERVICE = "smart-trainer"
-KEYRING_INTERVALS = "intervals.icu"
 # Coggan power zone upper bounds, % of FTP (the last zone is open-ended)
 DEFAULT_POWER_ZONES = (55, 75, 90, 105, 120, 150, 999)
 
@@ -272,46 +268,6 @@ def _apply(model: BaseModel, changes: dict[str, Any]) -> None:
             setattr(model, name, new)
 
 
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
-LOG_MAX_BYTES = 1_000_000  # rotate the log file at ~1 MB
-LOG_BACKUPS = 5  # keep smart-trainer.log.1 … .5
-
-
-def log_path() -> Path:
-    """Location of the log file.
-
-    Returns:
-        Path: Path to ``logs/smart-trainer.log`` inside the app directory.
-    """
-    return APP_DIR / "logs" / "smart-trainer.log"
-
-
-def setup_logging(to_file: bool, level: int = logging.INFO) -> Path | None:
-    """Log either to a size-rotated file in the app directory or to the console.
-
-    Args:
-        to_file (bool): Write to the rotating log file (e.g. in the native app, which
-            has no console) instead of the console (stderr).
-        level (int): Root logger level.
-
-    Returns:
-        Path | None: The log file path, or ``None`` when logging to the console.
-    """
-    if not to_file:
-        logging.basicConfig(level=level, format=LOG_FORMAT)
-        return None
-    from logging.handlers import RotatingFileHandler
-
-    p = log_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    file_handler = RotatingFileHandler(
-        p, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
-    )
-    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    logging.basicConfig(level=level, handlers=[file_handler])
-    return p
-
-
 def sessions_dir() -> Path:
     """Return the directory where ride sessions are stored, creating it if needed.
 
@@ -321,87 +277,3 @@ def sessions_dir() -> Path:
     d = APP_DIR / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-def _secret_env(conn_id: str, name: str) -> str:
-    """Environment variable that overrides a secret, e.g. ``SMART_TRAINER_STRAVA_CLIENT_SECRET``."""
-    return re.sub(r"[^A-Z0-9]+", "_", f"SMART_TRAINER_{conn_id}_{name}".upper())
-
-
-def get_secret(conn_id: str, name: str) -> str | None:
-    """Get a connection secret from the environment or the system keyring.
-
-    Args:
-        conn_id (str): Connection id (e.g. ``"strava"``).
-        name (str): Secret name (e.g. ``"refresh_token"``).
-
-    Returns:
-        str | None: The secret, or ``None`` if not set.
-    """
-    if value := os.environ.get(_secret_env(conn_id, name)):
-        return value
-    try:
-        import keyring
-
-        return keyring.get_password(KEYRING_SERVICE, f"{conn_id}.{name}")
-    except Exception:
-        log.exception("keyring unavailable")
-        return None
-
-
-def set_secret(conn_id: str, name: str, value: str) -> None:
-    """Store a connection secret in the system keyring.
-
-    Args:
-        conn_id (str): Connection id.
-        name (str): Secret name.
-        value (str): Secret value.
-    """
-    import keyring
-
-    keyring.set_password(KEYRING_SERVICE, f"{conn_id}.{name}", value)
-
-
-def delete_secret(conn_id: str, name: str) -> None:
-    """Remove a connection secret from the system keyring (no error if missing).
-
-    Args:
-        conn_id (str): Connection id.
-        name (str): Secret name.
-    """
-    import keyring
-    from keyring.errors import PasswordDeleteError
-
-    with contextlib.suppress(PasswordDeleteError):
-        keyring.delete_password(KEYRING_SERVICE, f"{conn_id}.{name}")
-
-
-def get_api_key() -> str | None:
-    """Get the intervals.icu API key.
-
-    Looks at the ``INTERVALS_API_KEY`` environment variable first, then the
-    system keyring.
-
-    Returns:
-        str | None: The API key, or ``None`` if not configured.
-    """
-    if key := os.environ.get("INTERVALS_API_KEY"):
-        return key
-    try:
-        import keyring
-
-        return keyring.get_password(KEYRING_SERVICE, KEYRING_INTERVALS)
-    except Exception:
-        log.exception("keyring unavailable")
-        return None
-
-
-def set_api_key(key: str) -> None:
-    """Store the intervals.icu API key in the system keyring.
-
-    Args:
-        key (str): The API key.
-    """
-    import keyring
-
-    keyring.set_password(KEYRING_SERVICE, KEYRING_INTERVALS, key)

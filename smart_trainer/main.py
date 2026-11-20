@@ -13,9 +13,10 @@ from nicegui import app, native, ui
 
 from smart_trainer.ble import fake
 from smart_trainer.ble.scanner import make_device
-from smart_trainer.config import APP_DIR, Settings, setup_logging
+from smart_trainer.config import APP_DIR, Settings
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
+from smart_trainer.logs import setup_logging
 from smart_trainer.sync import registry
 from smart_trainer.sync.base import Capability
 from smart_trainer.ui.context import AppContext

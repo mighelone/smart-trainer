@@ -38,7 +38,7 @@ def isolated_app(tmp_path):
     # patches only after NiceGUI's ``user`` fixture has shut its app down.
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(config, "APP_DIR", tmp_path / "app")
-        for name in [n for n in os.environ if n.startswith("SMART_TRAINER_")]:
+        for name in [n for n in os.environ if n.startswith(("SMART_TRAINER_", "INTERVALS_"))]:
             patch.delenv(name)  # secrets can come from the environment too
         previous = keyring.get_keyring()
         keyring.set_keyring(MemoryKeyring())

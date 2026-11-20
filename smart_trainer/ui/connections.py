@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 
 from nicegui import ui
 
-from smart_trainer.config import get_api_key, get_secret, set_secret
+from smart_trainer.keychain import get_api_key, get_secret, set_secret
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.sync.intervals import IntervalsConnection
 from smart_trainer.sync.strava import StravaConnection
