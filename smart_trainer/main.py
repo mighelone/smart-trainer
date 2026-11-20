@@ -41,7 +41,7 @@ async def _startup(use_fake: bool) -> None:
         settings = settings.model_copy(
             update={"role_assignment": {}, "devices": {}, "auto_upload": False}
         )
-        settings._readonly = True
+        settings.readonly = True
         sessions = APP_DIR / "demo-sessions"
         sessions.mkdir(parents=True, exist_ok=True)
     engine = Engine.from_settings(

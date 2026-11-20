@@ -15,7 +15,7 @@ from smart_trainer.sync.service import SyncService
 
 def _store(tmp_path) -> SessionStore:
     st = Settings(ftp=200, auto_upload=False)
-    st._readonly = True
+    st.readonly = True
     sync = SyncService(st, deque(), lambda: [], ride_active=lambda: False)
     return SessionStore(tmp_path, sync, deque())
 

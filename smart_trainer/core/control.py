@@ -210,6 +210,14 @@ class TrainerController:
             if self.guard:
                 self.guard.reset()
 
+    def set_spiral_guard(self, guard: SpiralGuard | None) -> None:
+        """Replace the spiral guard; a release in progress ends with the old guard.
+
+        Args:
+            guard (SpiralGuard | None): The new guard; ``None`` turns it off.
+        """
+        self.guard = guard
+
     def set_target(self, mode: Mode, value: float) -> None:
         """Switch to a mode and set its target.
 

@@ -160,6 +160,18 @@ class Connection(ABC):
         """
         return self.conf.options
 
+    def update_settings(self, **changes: Any) -> None:
+        """Validate, apply and save changes to this connection's settings.
+
+        Args:
+            **changes (Any): ``enabled``, ``auto_upload`` and/or ``options`` (merged into
+                the existing options).
+
+        Raises:
+            ValueError: If a field is unknown or a value is invalid (nothing is changed).
+        """
+        self.settings.update_connection(self.id, **changes)
+
     def has(self, capability: Capability) -> bool:
         """Whether the connection has a capability.
 

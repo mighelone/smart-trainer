@@ -289,11 +289,12 @@ class IntervalsConnection(Connection):
         """
         set_api_key(key)
 
-    def client(self, api_key: str | None = None) -> IntervalsClient:
+    def client(self, api_key: str | None = None, athlete_id: str | None = None) -> IntervalsClient:
         """Create an API client.
 
         Args:
             api_key (str | None): Key to use instead of the stored one.
+            athlete_id (str | None): Athlete id to use instead of the configured one.
 
         Raises:
             IntervalsError: If no API key is configured.
@@ -304,18 +305,19 @@ class IntervalsConnection(Connection):
         key = api_key or get_api_key()
         if not key:
             raise IntervalsError("No intervals.icu API key")
-        return IntervalsClient(key, self.athlete_id)
+        return IntervalsClient(key, athlete_id or self.athlete_id)
 
-    async def test(self, api_key: str | None = None) -> str:
+    async def test(self, api_key: str | None = None, athlete_id: str | None = None) -> str:
         """Check the API key by fetching the athlete.
 
         Args:
             api_key (str | None): Key to test instead of the stored one.
+            athlete_id (str | None): Athlete id to test instead of the configured one.
 
         Returns:
             str: The athlete name.
         """
-        async with self.client(api_key) as c:
+        async with self.client(api_key, athlete_id) as c:
             return (await c.athlete()).get("name") or "athlete"
 
     async def upload_activity(self, ride: RideUpload) -> str:

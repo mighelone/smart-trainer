@@ -33,9 +33,13 @@ Dependency rules:
 
 - **One source of truth.** Every piece of state has exactly one owner. Never keep a copy that
   something has to keep in sync by hand.
-- **Settings** (persisted): owned by `core`. The UI changes them only through a `core` method
-  that validates, saves and applies the change (e.g. `engine.set_spiral_guard(on)`), never by
-  assigning fields and calling `save()`.
+- **Settings** (persisted): any page may receive `Settings` and read it freely, but never
+  assigns its fields or calls `save()`. Changes go through a method that validates, saves and
+  applies them:
+  - `settings.update(...)` for a value that is only read when needed (FTP, cues, power matching);
+  - `connection.update_settings(...)` for a connection's switches and options;
+  - a component method when the change must also act on running objects
+    (`engine.set_spiral_guard(on)`).
 - **Ride and device state** (ride, controller, devices, snapshot, and the workout selected for
   the next ride): owned by the `core` components. The UI reads it freely but changes it only
   through methods (`ride.set_erg(...)`, `controller.set_manual(mode, value)`), never by assigning

@@ -51,7 +51,7 @@ def pages(user: User):
 async def engine(pages, tmp_path):
     """Engine with simulated devices and no connections, installed in the pages module."""
     settings = Settings(ftp=200, auto_upload=False)
-    settings._readonly = True
+    settings.readonly = True
     e = Engine.from_settings(settings, sessions=tmp_path)
     e.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
     e.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
@@ -326,3 +326,18 @@ async def test_manual_control_sets_the_trainer_target(user: User, engine):
     slider.value = 4.5
     assert engine.controller.mode == Mode.SLOPE
     assert engine.controller.target_for(Mode.SLOPE) == 4.5
+
+
+async def test_settings_save_updates_profile_and_power_matching(user: User, engine, pages):
+    settings = pages.S.settings
+    settings.sync_profile = False
+    power_match = engine.controller.matcher.cfg
+    await user.open("/settings")
+    for marker, value in (("ftp", 265), ("max-offset", 45)):
+        field = user.find(marker=marker).elements.pop()
+        assert isinstance(field, ui.number)
+        field.value = value
+    user.find(marker="save-settings").click()
+    await user.should_see("Settings saved")
+    assert settings.ftp == 265
+    assert power_match.max_offset_w == 45  # the controller sees the change right away

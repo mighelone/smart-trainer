@@ -88,7 +88,7 @@ class MockIntervals(IntervalsConnection):
     def is_configured(self) -> bool:
         return True
 
-    def client(self, api_key: str | None = None) -> IntervalsClient:
+    def client(self, api_key: str | None = None, athlete_id: str | None = None) -> IntervalsClient:
         return _client(self.handler)
 
 
@@ -131,7 +131,7 @@ async def test_engine_sync_profile_skipped(engine, settings, tmp_path):
     assert await engine.sync.sync_profile() is None
     assert settings.ftp == 200 and "ride" in engine.messages[-1]
     engine.ride.state = RideState.IDLE
-    settings._readonly = True
+    settings.readonly = True
     assert await engine.sync.sync_profile() is None
     assert settings.ftp == 200
     no_account = _make_engine(tmp_path, None)

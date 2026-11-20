@@ -49,6 +49,7 @@ class Engine:
     ``eq=False`` keeps identity semantics: an engine is a service, not a value.
 
     Attributes:
+        settings (Settings): User settings, shared with the components.
         messages (deque[str]): User-facing status messages, shared by the components.
         selector (SourceSelector): Resolves readings into snapshots.
         controller (TrainerController): Trainer control logic.
@@ -64,6 +65,7 @@ class Engine:
             (the values used for control and recording; read-only for consumers).
     """
 
+    settings: Settings
     messages: deque[str]
     selector: SourceSelector
     controller: TrainerController
@@ -124,6 +126,7 @@ class Engine:
         calibration = CalibrationService(devices, controller, messages, ride_active)
         ride = Ride(settings, controller, store, messages, tick_s, blocker=calibration.ride_blocker)
         return cls(
+            settings=settings,
             messages=messages,
             selector=selector,
             controller=controller,
@@ -135,6 +138,16 @@ class Engine:
             tick_s=tick_s,
             run_loop=run_loop,
         )
+
+    # ----------------------------------------------------------------- settings
+    def set_spiral_guard(self, on: bool) -> None:
+        """Turn the ERG spiral guard on or off: save the setting and apply it right away.
+
+        Args:
+            on (bool): Whether the guard is on.
+        """
+        self.settings.update(erg_spiral_guard=on)
+        self.controller.set_spiral_guard(SpiralGuard() if on else None)
 
     # ---------------------------------------------------------------- lifecycle
     async def __aenter__(self) -> Self:

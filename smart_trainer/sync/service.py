@@ -111,7 +111,7 @@ class SyncService:
         Raises:
             SyncUnavailable: If nothing can be uploaded; a message explains why.
         """
-        if self._settings._readonly:
+        if self._settings.readonly:
             self._messages.append("Demo mode: uploads are disabled")
             raise SyncUnavailable("demo mode")
         conns = [
@@ -157,7 +157,7 @@ class SyncService:
             list[str] | None: Labels of the changed fields, or ``None`` if the sync
             didn't happen (a message explains why).
         """
-        if self._settings._readonly:
+        if self._settings.readonly:
             self._messages.append("Demo mode: profile sync is disabled")
             return None
         if self._ride_active():
