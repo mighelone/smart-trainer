@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
-from smart_trainer.ui import connections
+from smart_trainer.ui.connections import connection_forms
 from smart_trainer.ui.context import AppContext, LiveRide
 from smart_trainer.ui.pages.devices import DevicesPage
 from smart_trainer.ui.pages.frame import frame
@@ -21,6 +21,8 @@ def register_pages(ctx: AppContext) -> None:
     Args:
         ctx (AppContext): The app's objects.
     """
+    ctx.strava.register_route()
+    forms = connection_forms(ctx.strava)
 
     @ui.page("/")
     def ride_page() -> None:
@@ -55,6 +57,4 @@ def register_pages(ctx: AppContext) -> None:
         """Settings page: rider profile, connections and power matching."""
         frame(ctx, "Settings")
         e = ctx.engine
-        SettingsPage(e.sync, e.messages, ctx.settings, e.set_spiral_guard)
-
-    connections.register_strava_callback(ctx.settings)
+        SettingsPage(e.sync, e.messages, ctx.settings, e.set_spiral_guard, forms)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -14,7 +14,7 @@ from smart_trainer.config import Settings
 from smart_trainer.core.control import SPIRAL_RELEASE_RPM, SPIRAL_RESUME_RPM
 from smart_trainer.sync.base import Capability
 from smart_trainer.sync.service import SyncService
-from smart_trainer.ui.connections import connection_card
+from smart_trainer.ui.connections import ConnectionCard, FormFactory
 from smart_trainer.ui.widgets.cues import CuePlayer
 
 log = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ class SettingsPage:
         messages: deque[str],
         settings: Settings,
         set_spiral_guard: Callable[[bool], None],
+        forms: Mapping[str, FormFactory],
     ) -> None:
         """Build the page.
 
@@ -78,10 +79,12 @@ class SettingsPage:
             settings (Settings): User settings.
             set_spiral_guard (Callable[[bool], None]): Turns the ERG spiral guard on or off
                 (saves the setting and applies it to the trainer control).
+            forms (Mapping[str, FormFactory]): Each connection's own settings form, by id.
         """
         self.sync_service = sync
         self.messages = messages
         self._set_spiral_guard = set_spiral_guard
+        self.forms = forms
         self.st = settings
         with (
             ui.column().classes("page page-narrow [&_.q-field]:w-full"),
@@ -158,7 +161,7 @@ class SettingsPage:
         ).tooltip("Each connection below can opt out of automatic uploads")
         for conn in self.sync_service.connections():
             ui.separator()
-            connection_card(conn, self.credentials_changed)
+            ConnectionCard(conn, self.credentials_changed, self.forms.get(conn.id))
 
     # ---------------------------------------------------------- profile
     def refresh_profile(self) -> None:
