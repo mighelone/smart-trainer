@@ -87,59 +87,58 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
         self._responses = asyncio.Queue()
         self._status = asyncio.Queue()
         self.speed_kmh = None
-
-        def on_bike_data(_char, data: bytearray) -> None:
-            """Parse an Indoor Bike Data notification and emit a reading.
-
-            Args:
-                _char (BleakGATTCharacteristic): Characteristic that sent the notification.
-                data (bytearray): Raw notification payload.
-            """
-            d = parse_indoor_bike_data(bytes(data))
-            if d.speed_kmh is not None:
-                self.speed_kmh = d.speed_kmh
-            self.emit(
-                Reading(
-                    self.id,
-                    power=d.power,
-                    cadence=d.cadence_rpm,
-                    speed_kmh=d.speed_kmh,
-                    hr=d.heart_rate or None,
-                )
-            )
-
-        def on_cp(_char, data: bytearray) -> None:
-            """Queue a parsed control point response.
-
-            Args:
-                _char (BleakGATTCharacteristic): Characteristic that sent the notification.
-                data (bytearray): Raw notification payload.
-            """
-            resp = parse_control_response(bytes(data))
-            if resp:
-                self._responses.put_nowait(resp)
-
-        def on_status(_char, data: bytearray) -> None:
-            """Queue a parsed machine status notification.
-
-            Args:
-                _char (BleakGATTCharacteristic): Characteristic that sent the notification.
-                data (bytearray): Raw notification payload.
-            """
-            st = parse_machine_status(bytes(data))
-            if st is None:
-                return
-            if st.op == FtmsStatus.CONTROL_LOST:
-                self.has_control = False
-            self._status.put_nowait(st)
-
-        await client.start_notify(uuids.FTMS_CONTROL_POINT, on_cp)
-        await client.start_notify(uuids.INDOOR_BIKE_DATA, on_bike_data)
+        await client.start_notify(uuids.FTMS_CONTROL_POINT, self._on_control_point)
+        await client.start_notify(uuids.INDOOR_BIKE_DATA, self._on_bike_data)
         try:  # optional: only needed for spin-down calibration
-            await client.start_notify(uuids.FTMS_STATUS, on_status)
+            await client.start_notify(uuids.FTMS_STATUS, self._on_status)
         except Exception as exc:
             log.info("%s: no machine status notifications (%s)", self.name, exc)
         await self._take_control()
+
+    def _on_bike_data(self, _char, data: bytearray) -> None:
+        """Parse an Indoor Bike Data notification and emit a reading.
+
+        Args:
+            _char (BleakGATTCharacteristic): Characteristic that sent the notification.
+            data (bytearray): Raw notification payload.
+        """
+        d = parse_indoor_bike_data(bytes(data))
+        if d.speed_kmh is not None:
+            self.speed_kmh = d.speed_kmh
+        self.emit(
+            Reading(
+                self.id,
+                power=d.power,
+                cadence=d.cadence_rpm,
+                speed_kmh=d.speed_kmh,
+                hr=d.heart_rate or None,
+            )
+        )
+
+    def _on_control_point(self, _char, data: bytearray) -> None:
+        """Queue a parsed control point response.
+
+        Args:
+            _char (BleakGATTCharacteristic): Characteristic that sent the notification.
+            data (bytearray): Raw notification payload.
+        """
+        resp = parse_control_response(bytes(data))
+        if resp:
+            self._responses.put_nowait(resp)
+
+    def _on_status(self, _char, data: bytearray) -> None:
+        """Queue a parsed machine status notification.
+
+        Args:
+            _char (BleakGATTCharacteristic): Characteristic that sent the notification.
+            data (bytearray): Raw notification payload.
+        """
+        st = parse_machine_status(bytes(data))
+        if st is None:
+            return
+        if st.op == FtmsStatus.CONTROL_LOST:
+            self.has_control = False
+        self._status.put_nowait(st)
 
     async def _take_control(self) -> None:
         """Request control of the trainer and start it if granted."""

@@ -158,49 +158,76 @@ class FakeTrainer(_FakeBase, ControllableTrainer, Calibratable):
         Raises:
             CalibrationError: If ``world.calibration_fails`` is set.
         """
-        low, high = self.SPIN_DOWN_TARGET
         dt = self.world.tick_s / 2
         on_progress(
             CalibrationProgress(CalibrationPhase.STARTING, "Asking the trainer for a spin-down…")
         )
         await asyncio.sleep(dt)
-        speed = 20.0
-        self.calibration_speed = speed
         try:
-            while speed < high:
-                speed = min(high + 1, speed + random.uniform(1.5, 3.0))
-                self.calibration_speed = speed
-                on_progress(
-                    CalibrationProgress(
-                        CalibrationPhase.SPEED_UP,
-                        f"Pedal up to {high:.0f} km/h and hold it until the trainer says stop.",
-                        speed,
-                        low,
-                        high,
-                        min(1.0, speed / high),
-                    )
-                )
-                await asyncio.sleep(dt)
-            start = speed
-            while speed > 1:
-                speed *= 0.75
-                self.calibration_speed = speed
-                on_progress(
-                    CalibrationProgress(
-                        CalibrationPhase.COAST,
-                        "Stop pedalling and let the flywheel coast. Don't touch the pedals.",
-                        speed,
-                        low,
-                        high,
-                        1 - speed / start,
-                    )
-                )
-                await asyncio.sleep(dt)
-                if self.world.calibration_fails and speed < start / 2:
-                    raise CalibrationError("The trainer reported a spin-down error (simulated).")
+            start = await self._speed_up(dt, on_progress)
+            await self._coast(start, dt, on_progress)
         finally:
             self.calibration_speed = None
         return CalibrationResult("Spin-down calibration complete.")
+
+    async def _speed_up(self, dt: float, on_progress: ProgressCallback) -> float:
+        """Simulate the rider speeding up past the spin-down target speed.
+
+        Args:
+            dt (float): Seconds between progress updates.
+            on_progress (ProgressCallback): Called with every progress update.
+
+        Returns:
+            float: The speed reached, in km/h.
+        """
+        low, high = self.SPIN_DOWN_TARGET
+        speed = 20.0
+        self.calibration_speed = speed
+        while speed < high:
+            speed = min(high + 1, speed + random.uniform(1.5, 3.0))
+            self.calibration_speed = speed
+            on_progress(
+                CalibrationProgress(
+                    CalibrationPhase.SPEED_UP,
+                    f"Pedal up to {high:.0f} km/h and hold it until the trainer says stop.",
+                    speed,
+                    low,
+                    high,
+                    min(1.0, speed / high),
+                )
+            )
+            await asyncio.sleep(dt)
+        return speed
+
+    async def _coast(self, start: float, dt: float, on_progress: ProgressCallback) -> None:
+        """Simulate the flywheel coasting down from ``start``.
+
+        Args:
+            start (float): Speed when the rider stopped pedalling, in km/h.
+            dt (float): Seconds between progress updates.
+            on_progress (ProgressCallback): Called with every progress update.
+
+        Raises:
+            CalibrationError: If ``world.calibration_fails`` is set.
+        """
+        low, high = self.SPIN_DOWN_TARGET
+        speed = start
+        while speed > 1:
+            speed *= 0.75
+            self.calibration_speed = speed
+            on_progress(
+                CalibrationProgress(
+                    CalibrationPhase.COAST,
+                    "Stop pedalling and let the flywheel coast. Don't touch the pedals.",
+                    speed,
+                    low,
+                    high,
+                    1 - speed / start,
+                )
+            )
+            await asyncio.sleep(dt)
+            if self.world.calibration_fails and speed < start / 2:
+                raise CalibrationError("The trainer reported a spin-down error (simulated).")
 
     def step(self) -> None:
         """Move the rider's true power towards the mode's goal and emit a biased reading."""

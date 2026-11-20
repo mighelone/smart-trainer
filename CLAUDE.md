@@ -88,8 +88,8 @@ Enforced by tools (don't repeat them here, change the config):
 
 Conventions:
 - Google-style docstrings with `Args:` / `Returns:` and types, on every function and class.
-- Size: split a module past ~400 lines and a function past ~40 lines. A long function is usually
-  several steps that want their own names.
+- Size: split a module past ~400 lines and a function past ~40 lines of code (its docstring
+  doesn't count). A long function is usually several steps that want their own names.
 - Use a `Protocol` to define the contract when a class has more than one implementation (a
   test fake counts).
 - Use meaningful names, no names with one letter
