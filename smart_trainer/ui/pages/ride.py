@@ -8,12 +8,12 @@ from nicegui import ui
 
 from smart_trainer.config import Settings
 from smart_trainer.core.control import Mode
-from smart_trainer.core.ride import Ride, RideState
-from smart_trainer.core.sessions import SessionStore
+from smart_trainer.core.ride import RideState
 from smart_trainer.core.workout import WorkoutRunner
 from smart_trainer.ui.context import AppContext, LiveRide
 from smart_trainer.ui.pages.frame import frame
-from smart_trainer.ui.pages.live import ride_status, start_ride, update_main_tiles
+from smart_trainer.ui.pages.live import MainTiles, ride_status, start_ride
+from smart_trainer.ui.pages.recovery import RecoveryDialog
 from smart_trainer.ui.widgets.charts import LiveChart, workout_chart
 from smart_trainer.ui.widgets.cues import CuePlayer
 from smart_trainer.ui.widgets.text import fmt, fmt_time, next_step_text, step_title
@@ -71,10 +71,7 @@ class RidePage:
     def _build_tiles(self) -> None:
         """Build the two rows of metric tiles."""
         with ui.element("div").classes("metric-grid"):
-            self.t_power = Tile("Power · 3s", "W", icon="bolt", size="lg", accent="#facc15")
-            self.t_target = Tile("Target", "W", icon="adjust", size="lg", accent="#4f8cff")
-            self.t_hr = Tile("Heart rate", "bpm", icon="favorite", size="lg", accent="#f43f5e")
-            self.t_cad = Tile("Cadence", "rpm", icon="autorenew", size="lg", accent="#a78bfa")
+            self.main_tiles = MainTiles(self.live_ride, self.settings)
         with ui.element("div").classes("metric-grid"):
             self.t_time = Tile("Elapsed", icon="schedule")
             self.t_step = Tile("Interval left", icon="timer")
@@ -231,9 +228,7 @@ class RidePage:
         self.ensure_chart()
         snap = self.live_ride.snapshot()
         riding = self.ride.state == RideState.RIDING
-        update_main_tiles(
-            self.live_ride, self.settings, self.t_power, self.t_target, self.t_hr, self.t_cad
-        )
+        self.main_tiles.update()
         self.t_speed.set(fmt(snap.speed_kmh, 1))
         self.t_bal.set(
             f"{snap.balance_left:.0f}/{100 - snap.balance_left:.0f}" if snap.balance_left else "--"
@@ -325,56 +320,6 @@ class RidePage:
             self.refresh_chart()
 
 
-def recovery_dialog(ride: Ride, store: SessionStore) -> None:
-    """Offer to resume, finish or discard an unfinished session.
-
-    Args:
-        ride (Ride): The ride (to resume into).
-        store (SessionStore): Recorded sessions (to finish or discard).
-    """
-    if ride.state != RideState.IDLE:
-        return
-    crashed = ride.recoverable_sessions()
-    if not crashed:
-        return
-    info = crashed[0]
-    with ui.dialog().props("persistent") as d, ui.card():
-        ui.label("Unfinished session found").classes("text-xl font-bold")
-        ui.label(
-            f"{info.name}, started {info.started:%a %d %b %H:%M}, "
-            f"{fmt_time(info.elapsed_s)} recorded ({info.n_samples} samples)"
-        )
-        ui.label("The app was closed or crashed during this ride.").classes("opacity-70")
-
-        def resume():
-            """Resume the unfinished session."""
-            try:
-                ride.resume(info)
-            except RuntimeError as exc:
-                ui.notify(str(exc), type="warning")
-                return
-            d.close()
-            ui.notify("Session resumed: start pedalling")
-
-        async def finish():
-            """Finalize the unfinished session without resuming it."""
-            d.close()
-            fit = await store.finish_crashed(info)
-            ui.notify(f"Saved {fit.name if fit else 'session'}")
-
-        def discard():
-            """Move the unfinished session to the discarded folder."""
-            d.close()
-            store.discard(info)
-            ui.notify("Session moved to sessions/discarded")
-
-        with ui.row():
-            ui.button("Resume", icon="play_arrow", on_click=resume).props("color=positive")
-            ui.button("Finish & save", icon="save", on_click=finish)
-            ui.button("Discard", icon="delete", on_click=discard).props("flat color=negative")
-    d.open()
-
-
 def build_ride_page(ctx: AppContext) -> None:
     """Ride page: live metrics, workout chart and ride controls.
 
@@ -389,5 +334,5 @@ def build_ride_page(ctx: AppContext) -> None:
         ctx.window.restore_full()  # an unfinished session needs the full page's dialog
     frame(ctx, "Ride")
     page = RidePage(LiveRide.of(e), e.messages, ctx.settings)
-    recovery_dialog(e.ride, e.store)
+    RecoveryDialog.offer(e.ride, e.store)
     ui.timer(0.5, page.loop)
