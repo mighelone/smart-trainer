@@ -19,7 +19,12 @@ from smart_trainer.ble.device import (
     Device,
 )
 from smart_trainer.config import Settings
-from smart_trainer.core.control import SPIRAL_RELEASE_RPM, SPIRAL_RESUME_RPM, Mode
+from smart_trainer.core.control import (
+    SPIRAL_RELEASE_RPM,
+    SPIRAL_RESUME_RPM,
+    Mode,
+    SpiralGuard,
+)
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.library import builtin_workouts
 from smart_trainer.core.recorder import SessionInfo, UploadState
@@ -1577,7 +1582,7 @@ class SettingsPage:
         """
         self.st.erg_spiral_guard = on
         self.st.save()
-        self.e.controller.spiral_guard = on
+        self.e.controller.guard = SpiralGuard() if on else None
 
     def toggle_auto(self) -> None:
         """Persist the global automatic upload switch."""

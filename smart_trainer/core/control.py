@@ -149,8 +149,8 @@ class SpiralGuard:
 class TrainerController:
     """Holds the current mode/target and pushes changes to the trainer.
 
-    In ERG mode the :class:`SpiralGuard` may replace the ERG command with a flat road
-    while the cadence has collapsed; the mode and the target stay as they are.
+    In ERG mode an injected :class:`SpiralGuard` may replace the ERG command with a flat
+    road while the cadence has collapsed; the mode and the target stay as they are.
 
     Attributes:
         RESEND_S (float): Seconds after which an unchanged command is resent.
@@ -160,21 +160,21 @@ class TrainerController:
         slope_pct (float): Simulated grade in percent.
         use_pedals (bool): Whether to match pedal power in ERG mode.
         matcher (PowerMatcher): Pedal power matcher.
-        spiral_guard (bool): Whether to let go of the ERG target when the cadence collapses.
-        guard (SpiralGuard): The spiral guard's state.
+        guard (SpiralGuard | None): Lets go of the ERG target when the cadence collapses;
+            ``None`` when the spiral guard is off.
         last_command (tuple[Mode, float] | None): Last command sent to the trainer.
         trainer (ControllableTrainer | None): Trainer being controlled.
     """
 
     RESEND_S = 10.0
 
-    def __init__(self, cfg: PowerMatch, spiral_guard: bool = True) -> None:
+    def __init__(self, cfg: PowerMatch, guard: SpiralGuard | None = None) -> None:
         """Initialize the controller.
 
         Args:
             cfg (PowerMatch): Pedal power matching parameters.
-            spiral_guard (bool): Whether to let go of the ERG target when the cadence
-                collapses.
+            guard (SpiralGuard | None): Spiral guard to apply in ERG mode; ``None``
+                turns it off.
         """
         self.mode = Mode.RESISTANCE
         self.erg_target = 150.0
@@ -182,8 +182,7 @@ class TrainerController:
         self.slope_pct = 0.0
         self.use_pedals = True
         self.matcher = PowerMatcher(cfg)
-        self.spiral_guard = spiral_guard
-        self.guard = SpiralGuard()
+        self.guard = guard
         self.last_command: tuple[Mode, float] | None = None
         self._last_sent_at = 0.0
         self.trainer: ControllableTrainer | None = None
@@ -208,7 +207,8 @@ class TrainerController:
         if mode != self.mode:
             self.mode = mode
             self.matcher.reset()
-            self.guard.reset()
+            if self.guard:
+                self.guard.reset()
 
     @property
     def erg_released(self) -> bool:
@@ -217,7 +217,7 @@ class TrainerController:
         Returns:
             bool: ``True`` while the spiral guard holds the trainer on a flat road.
         """
-        return self.guard.released
+        return self.guard is not None and self.guard.released
 
     def force_resend(self) -> None:
         """Force the next :meth:`apply` call to resend the command."""
@@ -254,11 +254,11 @@ class TrainerController:
         Returns:
             bool: Whether the ERG target is let go.
         """
-        if not self.spiral_guard:
-            self.guard.reset()
+        guard = self.guard
+        if guard is None:
             return False
-        was = self.guard.released
-        released = self.guard.update(snapshot.cadence, now if now is not None else time.monotonic())
+        was = guard.released
+        released = guard.update(snapshot.cadence, now if now is not None else time.monotonic())
         if was and not released:
             # power was under target while grinding: drop the integral it built up
             self.matcher.reset()

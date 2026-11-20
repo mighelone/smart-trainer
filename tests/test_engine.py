@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from smart_trainer.ble import fake
 from smart_trainer.config import Settings
-from smart_trainer.core.control import SPIRAL_RELEASE_SLOPE, Mode
+from smart_trainer.core.control import SPIRAL_RELEASE_SLOPE, Mode, SpiralGuard
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.recorder import find_unfinished
 from smart_trainer.core.ride import MAX_TICK_DT_S, RideState
@@ -196,3 +196,12 @@ async def test_spiral_guard_releases_and_resumes_erg(tmp_path):
         await _ride(e, 4, 1_700_000_011)
         assert not e.controller.erg_released
         assert trainer.mode == "erg" and trainer.value > 195
+
+
+def test_spiral_guard_follows_the_setting(tmp_path):
+    on = Engine.from_settings(Settings(auto_upload=False), sessions=tmp_path, run_loop=False)
+    assert isinstance(on.controller.guard, SpiralGuard)
+    off = Engine.from_settings(
+        Settings(auto_upload=False, erg_spiral_guard=False), sessions=tmp_path, run_loop=False
+    )
+    assert off.controller.guard is None and not off.controller.erg_released

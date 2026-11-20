@@ -303,9 +303,13 @@ async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeyp
 
 
 async def test_settings_switch_turns_the_spiral_guard_off(user: User, engine, pages):
+    from smart_trainer.core.control import SpiralGuard
+
     pages.S.settings.erg_spiral_guard = True
-    engine.controller.spiral_guard = True
+    engine.controller.guard = SpiralGuard()
     await user.open("/settings")
     user.find(marker="erg-spiral-guard").click()
     assert pages.S.settings.model_dump()["erg_spiral_guard"] is False
-    assert engine.controller.spiral_guard is False
+    assert engine.controller.guard is None
+    user.find(marker="erg-spiral-guard").click()  # and back on
+    assert isinstance(engine.controller.guard, SpiralGuard)

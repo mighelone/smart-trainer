@@ -30,7 +30,7 @@ from typing import Self
 
 from smart_trainer.config import Settings, sessions_dir
 from smart_trainer.core.calibration import CalibrationService
-from smart_trainer.core.control import TrainerController
+from smart_trainer.core.control import SpiralGuard, TrainerController
 from smart_trainer.core.devices import DeviceHub
 from smart_trainer.core.ride import MAX_TICK_DT_S, Ride
 from smart_trainer.core.sessions import SessionStore
@@ -103,7 +103,8 @@ class Engine:
         """
         messages: deque[str] = deque(maxlen=20)
         selector = SourceSelector()
-        controller = TrainerController(settings.power_match, settings.erg_spiral_guard)
+        guard = SpiralGuard() if settings.erg_spiral_guard else None
+        controller = TrainerController(settings.power_match, guard)
         devices = DeviceHub(
             settings, on_reading=selector.on_reading, on_change=controller.configure
         )

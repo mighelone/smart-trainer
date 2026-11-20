@@ -6,6 +6,7 @@ from smart_trainer.core.control import (
     SPIRAL_RELEASE_SLOPE,
     Mode,
     PowerMatcher,
+    SpiralGuard,
     TrainerController,
 )
 from smart_trainer.core.state import Snapshot
@@ -77,7 +78,7 @@ class _Trainer:
 def _controller(
     spiral_guard: bool = True, target: float = 250
 ) -> tuple[TrainerController, _Trainer]:
-    c = TrainerController(PowerMatch(), spiral_guard=spiral_guard)
+    c = TrainerController(PowerMatch(), SpiralGuard() if spiral_guard else None)
     trainer = _Trainer()
     c.trainer = cast(ControllableTrainer, trainer)
     c.use_pedals = False  # trainer power: the ERG command is the target itself
@@ -154,7 +155,7 @@ async def test_turning_the_guard_off_resumes_erg():
     c, trainer = _controller()
     t = await _ride(c, [30, 30, 30, 30])
     assert c.erg_released
-    c.spiral_guard = False
+    c.guard = None
     await _ride(c, [30], t)
     assert not c.erg_released and _last(trainer) == ("erg", 250)
 
