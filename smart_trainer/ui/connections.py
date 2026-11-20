@@ -59,10 +59,10 @@ def connection_card(conn: Connection, on_change: OnChange) -> None:
 
     def persist() -> None:
         """Save the switches."""
-        cs.enabled = bool(enabled.value)
+        switches = {"enabled": bool(enabled.value)}
         if auto is not None:
-            cs.auto_upload = bool(auto.value)
-        conn.settings.save()
+            switches["auto_upload"] = bool(auto.value)
+        conn.update_settings(**switches)
 
     with ui.row().classes("items-center w-full mt-2"):
         ui.label(conn.name).classes("section-title")
@@ -114,24 +114,24 @@ def intervals_settings(conn: Connection, on_change: OnChange) -> None:
 
     async def save() -> None:
         """Store the API key and athlete id."""
-        conn.options["athlete_id"] = athlete.value.strip() or "0"
+        conn.update_settings(options={"athlete_id": athlete.value.strip() or "0"})
         new_key = key.value.strip()
         if new_key:
             conn.set_api_key(new_key)
             key.value = ""
             key.props('placeholder="(saved)"')
-        conn.settings.save()
         ui.notify("intervals.icu settings saved", type="positive")
         if new_key:
             await on_change()
 
     async def test() -> None:
         """Test the typed (or stored) API key."""
-        conn.options["athlete_id"] = athlete.value.strip() or "0"
         if not (key.value.strip() or get_api_key()):
             ui.notify("Enter an API key first", type="warning")
             return
-        await _test(conn, api_key=key.value.strip() or None)
+        await _test(
+            conn, api_key=key.value.strip() or None, athlete_id=athlete.value.strip() or "0"
+        )
 
     with ui.row():
         ui.button("Save", icon="save", on_click=save).props("color=positive")
@@ -190,17 +190,16 @@ def strava_settings(conn: Connection, on_change: OnChange) -> None:
         Returns:
             bool: ``True`` if both are now set.
         """
-        conn.options["client_id"] = client_id.value.strip()
+        conn.update_settings(options={"client_id": client_id.value.strip()})
         if secret := client_secret.value.strip():
             set_secret(conn.id, "client_secret", secret)
             client_secret.value = ""
             client_secret.props('placeholder="(saved)"')
-        conn.settings.save()
         return bool(conn.client_id and get_secret(conn.id, "client_secret"))
 
     def connect() -> None:
         """Open the Strava authorization page in the system browser."""
-        if conn.settings._readonly:
+        if conn.settings.readonly:
             ui.notify("Demo mode: connections can't be changed", type="warning")
             return
         if not save_credentials():

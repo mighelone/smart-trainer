@@ -53,7 +53,7 @@ class UnconfiguredConnection(FakeConnection):
 
 def _store(tmp_path, conns, readonly=False, **settings):
     st = Settings(ftp=200, **settings)
-    st._readonly = readonly
+    st.readonly = readonly
     for c in conns:
         c.settings = st
     messages: deque[str] = deque()

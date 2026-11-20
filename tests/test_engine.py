@@ -1,6 +1,8 @@
 import asyncio
 from contextlib import asynccontextmanager
 
+import pytest
+
 from smart_trainer.ble import fake
 from smart_trainer.config import Settings
 from smart_trainer.core.control import SPIRAL_RELEASE_SLOPE, Mode, SpiralGuard
@@ -196,6 +198,16 @@ async def test_spiral_guard_releases_and_resumes_erg(tmp_path):
         await _ride(e, 4, 1_700_000_011)
         assert not e.controller.erg_released
         assert trainer.mode == "erg" and trainer.value > 195
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_set_spiral_guard_saves_and_applies(tmp_path, on):
+    settings = Settings(auto_upload=False, erg_spiral_guard=not on)
+    settings.readonly = True
+    e = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
+    e.set_spiral_guard(on)
+    assert settings.erg_spiral_guard is on
+    assert isinstance(e.controller.guard, SpiralGuard) is on
 
 
 def test_spiral_guard_follows_the_setting(tmp_path):

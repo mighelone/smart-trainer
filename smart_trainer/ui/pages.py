@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from nicegui import app, ui
 
@@ -23,7 +23,6 @@ from smart_trainer.core.control import (
     SPIRAL_RELEASE_RPM,
     SPIRAL_RESUME_RPM,
     Mode,
-    SpiralGuard,
 )
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.library import builtin_workouts
@@ -1445,7 +1444,7 @@ class SettingsPage:
         source = " or ".join(c.name for c in profile_sources) or "your training platform"
         ui.label("Rider profile").classes("section-title")
         self.sync = ui.switch(f"Sync FTP, zones and weight from {source}", value=st.sync_profile)
-        self.ftp = ui.number("FTP (W)", value=st.ftp, min=50, max=600, step=1)
+        self.ftp = ui.number("FTP (W)", value=st.ftp, min=50, max=600, step=1).mark("ftp")
         self.weight = ui.number("Weight (kg)", value=st.weight_kg, min=30, max=200, step=0.5)
         self.summary = ui.label("").classes("hint whitespace-pre-line")
         self.sync_btn = ui.button("Sync now", icon="sync", on_click=self.sync_now).props(
@@ -1458,11 +1457,15 @@ class SettingsPage:
         """Build the power matching section and the Save button."""
         pm = self.st.power_match
         ui.label("Power matching (pedals as power source)").classes("section-title mt-2")
-        self.max_off = ui.number("Max correction (W)", value=pm.max_offset_w, min=0, max=150)
+        self.max_off = ui.number("Max correction (W)", value=pm.max_offset_w, min=0, max=150).mark(
+            "max-offset"
+        )
         self.settle = ui.number(
             "Settle time after target change (s)", value=pm.settle_s, min=0, max=30
         )
-        ui.button("Save", icon="save", on_click=self.save).props("color=positive").classes("mt-2")
+        ui.button("Save", icon="save", on_click=self.save).props("color=positive").classes(
+            "mt-2"
+        ).mark("save-settings")
 
     def _build_ride(self) -> None:
         """Build the ride section: interval cues and the ERG spiral guard."""
@@ -1539,8 +1542,7 @@ class SettingsPage:
     async def toggle_sync(self) -> None:
         """Persist the sync switch; sync right away when it is turned on."""
         st = self.st
-        st.sync_profile = bool(self.sync.value)
-        st.save()
+        st.update(sync_profile=bool(self.sync.value))
         self.refresh_profile()
         if st.sync_profile and self.can_sync():
             await self.sync_now()
@@ -1554,24 +1556,28 @@ class SettingsPage:
     def save(self) -> None:
         """Validate the form values and persist the settings."""
         # ui.number yields None when a field is cleared: keep the current value then.
-        st = self.st
-        pm = st.power_match
-        if not st.sync_profile:  # synced values come from the profile connection only
-            st.ftp = int(self.ftp.value) if self.ftp.value is not None else st.ftp
-            st.weight_kg = (
-                float(self.weight.value) if self.weight.value is not None else st.weight_kg
-            )
+        changes: dict[str, Any] = {}
+        if not self.st.sync_profile:  # synced values come from the profile connection only
+            if self.ftp.value is not None:
+                changes["ftp"] = int(self.ftp.value)
+            if self.weight.value is not None:
+                changes["weight_kg"] = float(self.weight.value)
+        power_match = {}
         if self.max_off.value is not None:
-            pm.max_offset_w = float(self.max_off.value)
+            power_match["max_offset_w"] = float(self.max_off.value)
         if self.settle.value is not None:
-            pm.settle_s = float(self.settle.value)
-        st.save()
+            power_match["settle_s"] = float(self.settle.value)
+        try:
+            self.st.update(**changes, power_match=power_match)
+        except ValueError as exc:
+            log.warning("invalid settings: %s", exc)
+            ui.notify("Invalid settings: not saved", type="negative")
+            return
         ui.notify("Settings saved", type="positive")
 
     def toggle_cues(self) -> None:
         """Persist the interval cues switch."""
-        self.st.interval_cues = bool(self.cues.value)
-        self.st.save()
+        self.st.update(interval_cues=bool(self.cues.value))
 
     def toggle_spiral_guard(self, on: bool) -> None:
         """Persist the ERG spiral guard switch and apply it to the ride in progress.
@@ -1579,14 +1585,11 @@ class SettingsPage:
         Args:
             on (bool): Whether the guard is on.
         """
-        self.st.erg_spiral_guard = on
-        self.st.save()
-        self.e.controller.guard = SpiralGuard() if on else None
+        self.e.set_spiral_guard(on)
 
     def toggle_auto(self) -> None:
         """Persist the global automatic upload switch."""
-        self.st.auto_upload = bool(self.auto.value)
-        self.st.save()
+        self.st.update(auto_upload=bool(self.auto.value))
 
 
 @ui.page("/settings")

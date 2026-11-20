@@ -145,6 +145,57 @@ class Settings(BaseModel):
             data["connections"] = conns
         return data
 
+    @property
+    def readonly(self) -> bool:
+        """Whether changes are kept in memory only (demo mode never writes the config).
+
+        Returns:
+            bool: ``True`` in read-only mode.
+        """
+        return self._readonly
+
+    @readonly.setter
+    def readonly(self, value: bool) -> None:
+        """Turn read-only mode on or off.
+
+        Args:
+            value (bool): ``True`` to never write the config.
+        """
+        self._readonly = value
+
+    def update(self, **changes: Any) -> None:
+        """Validate and apply changes, then save (all or nothing).
+
+        A nested model (``power_match``) takes a dict of the fields to change and is
+        updated in place, so components holding it see the new values.
+
+        Args:
+            **changes (Any): New values by field name, e.g. ``ftp=260``.
+
+        Raises:
+            ValueError: If a field is unknown or a value is invalid (nothing is changed).
+        """
+        _apply(self, changes)
+        self.save()
+
+    def update_connection(self, conn_id: str, **changes: Any) -> None:
+        """Validate and apply changes to a connection's settings, then save.
+
+        ``options`` is merged into the existing options instead of replacing them.
+
+        Args:
+            conn_id (str): Connection id.
+            **changes (Any): New values by field name, e.g. ``enabled=False``.
+
+        Raises:
+            ValueError: If a field is unknown or a value is invalid (nothing is changed).
+        """
+        conf = self.connection(conn_id)
+        if "options" in changes:
+            changes = {**changes, "options": {**conf.options, **changes["options"]}}
+        _apply(conf, changes)
+        self.save()
+
     def connection(self, conn_id: str) -> ConnectionSettings:
         """Get the settings of a connection, adding the defaults if missing.
 
@@ -189,6 +240,36 @@ class Settings(BaseModel):
         tmp = p.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.model_dump(), indent=2))
         tmp.replace(p)
+
+
+def _apply(model: BaseModel, changes: dict[str, Any]) -> None:
+    """Validate changes on a copy of a model, then apply them to the model in place.
+
+    Nested models are updated field by field rather than replaced: other objects (the
+    trainer controller holds ``power_match``) keep a reference to them.
+
+    Args:
+        model (BaseModel): The model to change.
+        changes (dict[str, Any]): New values by field name; a dict for a nested model.
+
+    Raises:
+        ValueError: If a field is unknown or a value is invalid (``ValidationError`` is a
+            ``ValueError``); the model is left unchanged.
+    """
+    fields = type(model).model_fields
+    if unknown := sorted(set(changes) - set(fields)):
+        raise ValueError(f"unknown setting: {', '.join(unknown)}")
+    data = model.model_dump()
+    for name, value in changes.items():
+        nested = isinstance(getattr(model, name), BaseModel)
+        data[name] = {**data[name], **value} if nested else value
+    valid = type(model).model_validate(data)
+    for name in changes:
+        current, new = getattr(model, name), getattr(valid, name)
+        if isinstance(current, BaseModel):
+            _apply(current, new.model_dump())
+        else:
+            setattr(model, name, new)
 
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"

@@ -2145,6 +2145,7 @@ app = [
 [package.dev-dependencies]
 dev = [
     { name = "fitdecode" },
+    { name = "nicegui", extra = ["native"] },
     { name = "prek" },
     { name = "pyrefly" },
     { name = "pytest" },
@@ -2172,6 +2173,7 @@ provides-extras = ["app"]
 [package.metadata.requires-dev]
 dev = [
     { name = "fitdecode", specifier = ">=0.10" },
+    { name = "nicegui", extras = ["native"], specifier = ">=2.0" },
     { name = "prek", specifier = ">=0.5.10" },
     { name = "pyrefly", specifier = ">=1.4.1" },
     { name = "pytest", specifier = ">=8" },

@@ -34,7 +34,7 @@ are set (needs an Apple Developer account). Optional app icon: `packaging/icon.i
 ```bash
 uv run smart-trainer          # opens http://127.0.0.1:8080
 uv run smart-trainer --fake   # demo mode with simulated devices (separate data, no uploads)
-uv run smart-trainer --native # desktop window (`uv sync --extra app`)
+uv run smart-trainer --native # desktop window (pywebview)
 uv run smart-trainer --lan    # also reachable from an iPad/phone at http://<your-mac>.local:8080
 uv run smart-trainer --mini   # start as a small always-on-top overlay (implies --native)
 ```
