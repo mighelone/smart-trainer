@@ -48,8 +48,10 @@ Dependency rules:
   the page or widget object that uses it, not in a module-level global.
 - **Derived state** (status lines, zones, alerts) is computed from the owner's state when needed,
   not stored and updated separately.
-- Pages receive the engine and settings through their constructor (see Dependency injection);
-  the `@ui.page` functions are the only place that wires them.
+- Pages receive the components they use (`ride`, `devices`, `store`, …) and settings through
+  their constructor, never the whole `Engine` (see Dependency injection). `register_pages` in
+  `ui/pages.py` is the only place that wires them; `AppContext` (`ui/context.py`) carries the
+  engine and settings there.
 
 ## Design: dependency injection and SOLID
 
@@ -115,7 +117,7 @@ Errors and logging:
 - Never log secrets (API keys, tokens, Strava client secret).
 
 NiceGUI:
-- One class per page, built by its `@ui.page` function, which passes in the engine and settings.
+- One class per page, built by its `@ui.page` function, which passes in its components and settings.
 - No ride or device logic in UI code: callbacks call a `core` method and update the view.
 - Refresh timers only read state and update widgets; they never change engine state.
 - Blocking work (file I/O, SQLite, FIT export) runs in `asyncio.to_thread`, never in a callback
