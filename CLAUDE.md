@@ -138,6 +138,8 @@ NiceGUI:
   devices react, kept short.
 - Prefer the fakes (`ble/fake.py`, test doubles that implement the same `Protocol`) over
   `monkeypatch`/mocks.
+- Use `@pytest.mark.parametrize` to test several scenarios of the same functionality.
+- Use `@pytest.fixture` to share code and objects between tests.
 - Tests never touch the network, the real keychain or the user's settings and session folders
   (use `tmp_path`).
 
