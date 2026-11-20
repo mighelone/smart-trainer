@@ -183,8 +183,8 @@ def _power_hr(points: list[HistoryPoint]) -> tuple[list[list[float]], list[list[
         tuple[list[list[float]], list[list[float]]]: ``[x, watts]`` and ``[x, bpm]`` pairs,
         leaving out missing values.
     """
-    power: list[list[float]] = [[round(p.x), p.power] for p in points if p.power is not None]
-    hr: list[list[float]] = [[round(p.x), p.hr] for p in points if p.hr]
+    power: list[list[float]] = [[round(p.elapsed), p.power] for p in points if p.power is not None]
+    hr: list[list[float]] = [[round(p.elapsed), p.hr] for p in points if p.hr]
     return power, hr
 
 
@@ -217,11 +217,11 @@ class LiveChart:
 
     def sync(self) -> None:
         """Bring the chart up to date with the history."""
-        h = self.history
-        new = None if self._gen is None else h.since(self._gen, self._seen)
-        self._gen, self._seen = h.gen, h.total
+        history = self.history
+        new = None if self._gen is None else history.since(self._gen, self._seen)
+        self._gen, self._seen = history.gen, history.total
         if new is None:
-            self._redraw(list(h))
+            self._redraw(list(history))
         elif new:
             self._append(new)
 
@@ -236,7 +236,7 @@ class LiveChart:
         """
         if not self.free_ride:
             return None
-        end = max(FREE_RIDE_MIN_AXIS_S, last.x if last else 0)
+        end = max(FREE_RIDE_MIN_AXIS_S, last.elapsed if last else 0)
         return {"min": max(0, end - FREE_RIDE_WINDOW_S), "max": end}
 
     def _redraw(self, points: list[HistoryPoint]) -> None:
@@ -264,8 +264,8 @@ class LiveChart:
         # The options are observed: without suspending, every change below would send
         # the whole chart to the browser again, which is what this method avoids.
         with self.chart.props.suspend_updates():
-            for i, pts in ((1, power), (2, hr)):
-                data = opts["series"][i]["data"]
+            for series, pts in ((1, power), (2, hr)):
+                data = opts["series"][series]["data"]
                 data += pts
                 del data[: max(0, len(data) - self.history.maxlen)]
             if axis:

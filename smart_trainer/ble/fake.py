@@ -231,21 +231,21 @@ class FakeTrainer(_FakeBase, ControllableTrainer, Calibratable):
 
     def step(self) -> None:
         """Move the rider's true power towards the mode's goal and emit a biased reading."""
-        w = self.world
+        world = self.world
         if self.calibration_speed is not None:  # spinning down: only the flywheel speed
             self.emit(Reading(self.id, power=0, cadence=0, speed_kmh=self.calibration_speed))
             return
         if self.mode == "erg":
-            goal = self.value / w.trainer_bias  # trainer closes the loop on its OWN reading
+            goal = self.value / world.trainer_bias  # trainer closes the loop on its OWN reading
         elif self.mode == "resistance":
             goal = 60 + 2.4 * self.value
         else:
             goal = max(40.0, 150 + 30 * self.value)
-        w.true_power += (goal - w.true_power) * 0.5
-        w.cadence = w.cadence_base + random.uniform(-2, 2)
-        measured = w.true_power * w.trainer_bias + random.uniform(-3, 3)
-        speed = 3.6 * (max(w.true_power, 0) / 0.9) ** (1 / 3) * 1.0
-        self.emit(Reading(self.id, power=round(measured), cadence=w.cadence, speed_kmh=speed))
+        world.true_power += (goal - world.true_power) * 0.5
+        world.cadence = world.cadence_base + random.uniform(-2, 2)
+        measured = world.true_power * world.trainer_bias + random.uniform(-3, 3)
+        speed = 3.6 * (max(world.true_power, 0) / 0.9) ** (1 / 3) * 1.0
+        self.emit(Reading(self.id, power=round(measured), cadence=world.cadence, speed_kmh=speed))
 
 
 @register
@@ -279,12 +279,12 @@ class FakePowerMeter(_FakeBase, Calibratable):
             CalibrationError: If ``world.calibration_fails`` is set.
         """
         steps = 6
-        for i in range(steps):
+        for done in range(steps):
             on_progress(
                 CalibrationProgress(
                     CalibrationPhase.MEASURING,
                     "Measuring the zero offset: keep the cranks still…",
-                    fraction=i / steps,
+                    fraction=done / steps,
                 )
             )
             await asyncio.sleep(self.world.tick_s / 2)
@@ -300,14 +300,14 @@ class FakePowerMeter(_FakeBase, Calibratable):
 
     def step(self) -> None:
         """Emit a noisy power/cadence/balance reading unless the pedals are "dead"."""
-        w = self.world
-        if not w.pedals_alive:
+        world = self.world
+        if not world.pedals_alive:
             return
         self.emit(
             Reading(
                 self.id,
-                power=round(w.true_power + random.uniform(-4, 4)),
-                cadence=w.cadence + random.uniform(-1, 1),
+                power=round(world.true_power + random.uniform(-4, 4)),
+                cadence=world.cadence + random.uniform(-1, 1),
                 balance_left=50 + random.uniform(-2, 2),
             )
         )
@@ -332,9 +332,9 @@ class FakeHeartRate(_FakeBase):
 
     def step(self) -> None:
         """Move the heart rate towards a power-dependent steady state and emit it."""
-        w = self.world
-        w.hr += ((60 + 0.42 * w.true_power) - w.hr) * 0.05
-        self.emit(Reading(self.id, hr=round(w.hr)))
+        world = self.world
+        world.hr += ((60 + 0.42 * world.true_power) - world.hr) * 0.05
+        self.emit(Reading(self.id, hr=round(world.hr)))
 
 
 def fake_devices() -> list[Device]:

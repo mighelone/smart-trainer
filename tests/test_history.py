@@ -16,12 +16,12 @@ def _filled(n: int, maxlen: int = 100) -> History:
 
 def _xs(points: list[HistoryPoint] | None) -> list[float]:
     assert points is not None
-    return [p.x for p in points]
+    return [p.elapsed for p in points]
 
 
 def test_add_keeps_the_last_maxlen_points():
     h = _filled(5, maxlen=3)
-    assert [p.x for p in h] == [3, 4, 5] and len(h) == 3
+    assert [p.elapsed for p in h] == [3, 4, 5] and len(h) == 3
     assert h.total == 5  # dropped points still count
 
 

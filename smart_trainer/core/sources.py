@@ -24,15 +24,15 @@ class _Latest:
     value: float | None = None
     ts: float = 0.0
 
-    def set(self, v: float | None, ts: float) -> None:
+    def set(self, value: float | None, ts: float) -> None:
         """Store a new value, ignoring ``None``.
 
         Args:
-            v (float | None): The new value.
+            value (float | None): The new value.
             ts (float): Monotonic timestamp of the value.
         """
-        if v is not None:
-            self.value, self.ts = v, ts
+        if value is not None:
+            self.value, self.ts = value, ts
 
     def get(self, now: float) -> float | None:
         """Return the value if it is not stale.
@@ -69,18 +69,22 @@ class SourceSelector:
     )
     _last_snapshot_at: float | None = field(default=None, init=False, repr=False)
 
-    def on_reading(self, r: Reading) -> None:
+    def on_reading(self, reading: Reading) -> None:
         """Record the metrics contained in a reading.
 
         Args:
-            r (Reading): The incoming reading.
+            reading (Reading): The incoming reading.
         """
-        for m in self.METRICS:
-            v = getattr(r, m)
-            if v is not None:
-                self._latest.setdefault((r.device_id, m), _Latest()).set(v, r.ts)
-        if r.power is not None:
-            self._power_hist.setdefault(r.device_id, deque(maxlen=30)).append((r.ts, r.power))
+        for metric in self.METRICS:
+            value = getattr(reading, metric)
+            if value is not None:
+                self._latest.setdefault((reading.device_id, metric), _Latest()).set(
+                    value, reading.ts
+                )
+        if reading.power is not None:
+            self._power_hist.setdefault(reading.device_id, deque(maxlen=30)).append(
+                (reading.ts, reading.power)
+            )
 
     def value(self, device_id: str | None, metric: str, now: float | None = None):
         """Get the latest non-stale value of a metric for a device.
@@ -142,9 +146,9 @@ class SourceSelector:
             or ``(None, None)`` if no candidate has a value.
         """
         for dev in candidates:
-            v = self.value(dev, metric, now)
-            if v is not None:
-                return v, dev
+            value = self.value(dev, metric, now)
+            if value is not None:
+                return value, dev
         return None, None
 
     def create_snapshot(self, assignment: Assignment, now: float | None = None) -> Snapshot:

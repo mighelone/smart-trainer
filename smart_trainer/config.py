@@ -219,10 +219,10 @@ class Settings(BaseModel):
         Returns:
             Self: The loaded settings, or defaults if missing or invalid.
         """
-        p = cls.path()
-        if p.exists():
+        path = cls.path()
+        if path.exists():
             try:
-                return cls.model_validate_json(p.read_text())
+                return cls.model_validate_json(path.read_text())
             except Exception:
                 log.exception("invalid config, using defaults")
         return cls()
@@ -231,11 +231,11 @@ class Settings(BaseModel):
         """Atomically write the settings to disk (no-op in read-only/demo mode)."""
         if self._readonly:
             return
-        p = self.path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
+        path = self.path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.model_dump(), indent=2))
-        tmp.replace(p)
+        tmp.replace(path)
 
 
 def _apply(model: BaseModel, changes: dict[str, Any]) -> None:
@@ -274,6 +274,6 @@ def sessions_dir() -> Path:
     Returns:
         Path: The sessions directory.
     """
-    d = APP_DIR / "sessions"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    directory = APP_DIR / "sessions"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory

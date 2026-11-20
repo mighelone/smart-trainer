@@ -32,11 +32,11 @@ def _ride_settings(athlete: dict) -> dict:
     Returns:
         dict: The Ride (else VirtualRide, else first) sport settings, or ``{}``.
     """
-    sports = [s for s in athlete.get("sportSettings") or [] if isinstance(s, dict)]
+    sports = [sport for sport in athlete.get("sportSettings") or [] if isinstance(sport, dict)]
     for wanted in ("Ride", "VirtualRide"):
-        for s in sports:
-            if wanted in (s.get("types") or []):
-                return s
+        for sport in sports:
+            if wanted in (sport.get("types") or []):
+                return sport
     return sports[0] if sports else {}
 
 
@@ -143,12 +143,14 @@ class IntervalsClient:
         Returns:
             httpx.Response: The successful response.
         """
-        r = await self._client.request(method, url, **kw)
-        if r.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}:
+        response = await self._client.request(method, url, **kw)
+        if response.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}:
             raise IntervalsError("intervals.icu rejected the API key")
-        if r.is_error:
-            raise IntervalsError(f"intervals.icu error {r.status_code}: {r.text[:200]}")
-        return r
+        if response.is_error:
+            raise IntervalsError(
+                f"intervals.icu error {response.status_code}: {response.text[:200]}"
+            )
+        return response
 
     async def athlete(self) -> dict:
         """Fetch the athlete profile.
@@ -182,7 +184,7 @@ class IntervalsClient:
         Returns:
             list[PlannedWorkout]: Planned workouts sorted by day.
         """
-        r = await self._request(
+        response = await self._request(
             "GET",
             f"/athlete/{self.athlete_id}/events",
             params={
@@ -192,7 +194,7 @@ class IntervalsClient:
             },
         )
         out: list[PlannedWorkout] = []
-        for ev in r.json():
+        for ev in response.json():
             if ev.get("type") not in (None, "Ride", "VirtualRide"):
                 continue
             name = ev.get("name") or "Workout"
@@ -217,10 +219,10 @@ class IntervalsClient:
             Workout | None: The parsed workout, or ``None`` if unavailable.
         """
         try:
-            r = await self._request(
+            response = await self._request(
                 "GET", f"/athlete/{self.athlete_id}/events/{event_id}/download.zwo"
             )
-            wo = parse_zwo(r.text)
+            wo = parse_zwo(response.text)
             wo.name, wo.source_id = name, str(event_id)
             return wo
         except Exception as exc:
@@ -242,13 +244,13 @@ class IntervalsClient:
         if ride.workout_source_id:
             params["paired_event_id"] = ride.workout_source_id
         with ride.fit_path.open("rb") as fh:
-            r = await self._request(
+            response = await self._request(
                 "POST",
                 f"/athlete/{self.athlete_id}/activities",
                 params=params,
                 files={"file": (ride.fit_path.name, fh, "application/octet-stream")},
             )
-        data = r.json()
+        data = response.json()
         return str(data.get("id") or data.get("activities", [{}])[0].get("id", ""))
 
 
@@ -317,8 +319,8 @@ class IntervalsConnection(Connection):
         Returns:
             str: The athlete name.
         """
-        async with self.client(api_key, athlete_id) as c:
-            return (await c.athlete()).get("name") or "athlete"
+        async with self.client(api_key, athlete_id) as client:
+            return (await client.athlete()).get("name") or "athlete"
 
     async def upload_activity(self, ride: RideUpload) -> str:
         """Upload a ride.
@@ -329,8 +331,8 @@ class IntervalsConnection(Connection):
         Returns:
             str: Id of the created activity.
         """
-        async with self.client() as c:
-            return await c.upload_activity(ride)
+        async with self.client() as client:
+            return await client.upload_activity(ride)
 
     async def list_workouts(
         self, oldest: date, newest: date, ftp: int, zones: list[int] | None = None
@@ -346,8 +348,8 @@ class IntervalsConnection(Connection):
         Returns:
             list[PlannedWorkout]: Planned workouts sorted by day.
         """
-        async with self.client() as c:
-            return await c.list_workouts(oldest, newest, ftp, zones)
+        async with self.client() as client:
+            return await client.list_workouts(oldest, newest, ftp, zones)
 
     async def profile(self) -> AthleteProfile:
         """Fetch the rider's profile.
@@ -355,5 +357,5 @@ class IntervalsConnection(Connection):
         Returns:
             AthleteProfile: The rider profile.
         """
-        async with self.client() as c:
-            return await c.profile()
+        async with self.client() as client:
+            return await client.profile()

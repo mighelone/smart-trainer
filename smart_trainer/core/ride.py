@@ -164,13 +164,15 @@ class Ride:
         )
         self.history.restart()
         active, prev_t = 0.0, None
-        for r in self.recorder.samples():  # restore the chart from what was recorded
-            if not r["paused"]:  # same clamp as the live ticks; crash gaps don't count
-                gap = self.tick_s if prev_t is None else r["t"] - prev_t
+        for row in self.recorder.samples():  # restore the chart from what was recorded
+            if not row["paused"]:  # same clamp as the live ticks; crash gaps don't count
+                gap = self.tick_s if prev_t is None else row["t"] - prev_t
                 active += min(max(gap, 0.0), MAX_TICK_DT_S)
-            prev_t = r["t"]
+            prev_t = row["t"]
             self.history.add(
-                HistoryPoint(r["elapsed"] or 0.0, r["power"], r["hr"], r["cadence"], r["target"])
+                HistoryPoint(
+                    row["elapsed"] or 0.0, row["power"], row["hr"], row["cadence"], row["target"]
+                )
             )
         self.seconds = active
         self._begin("Session resumed")
@@ -270,8 +272,8 @@ class Ride:
                 self.controller.mode.value,
                 now_wall,
             )
-        x = self.runner.elapsed if self.runner else self.seconds
-        self.history.add(HistoryPoint(x, snap.power_mean, snap.hr, snap.cadence, target))
+        elapsed = self.runner.elapsed if self.runner else self.seconds
+        self.history.add(HistoryPoint(elapsed, snap.power_mean, snap.hr, snap.cadence, target))
 
     def _advance_workout(self, paused: bool, dt: float) -> float | None:
         """Advance the workout, starting a lap on each new step.
@@ -307,13 +309,13 @@ class Ride:
         runner = self.runner
         if runner is None or paused or runner.finished:
             return
-        i, _, _, left = runner.current()
+        index, _, _, left = runner.current()
         nxt = runner.next_step()
-        if nxt is None or left > CUE_LEAD_S or self._cued_step == i:
+        if nxt is None or left > CUE_LEAD_S or self._cued_step == index:
             return
-        self._cued_step = i
+        self._cued_step = index
         seq = self.cue.seq + 1 if self.cue else 1
-        self.cue = StepCue(seq, i, nxt, left)
+        self.cue = StepCue(seq, index, nxt, left)
 
     @property
     def cadence_target(self) -> int | None:

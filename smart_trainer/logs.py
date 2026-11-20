@@ -37,11 +37,11 @@ def setup_logging(to_file: bool, level: int = logging.INFO) -> Path | None:
         return None
     from logging.handlers import RotatingFileHandler
 
-    p = log_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
+    path = log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     file_handler = RotatingFileHandler(
-        p, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
+        path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
     )
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logging.basicConfig(level=level, handlers=[file_handler])
-    return p
+    return path

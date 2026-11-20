@@ -333,20 +333,20 @@ def read_info(path: Path, con: sqlite3.Connection | None = None) -> SessionInfo:
     own = con is None
     con = con or _connect(path)
     try:
-        r = con.execute("SELECT * FROM session WHERE id=1").fetchone()
-        n = con.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
-        wo = Workout.from_dict(json.loads(r["workout_json"])) if r["workout_json"] else None
+        row = con.execute("SELECT * FROM session WHERE id=1").fetchone()
+        n_samples = con.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+        wo = Workout.from_dict(json.loads(row["workout_json"])) if row["workout_json"] else None
         return SessionInfo(
             path,
-            "finished" if r["status"] == "uploaded" else r["status"],
-            r["name"],
-            r["started_at"],
-            r["updated_at"],
-            r["ftp"],
-            r["elapsed_s"],
+            "finished" if row["status"] == "uploaded" else row["status"],
+            row["name"],
+            row["started_at"],
+            row["updated_at"],
+            row["ftp"],
+            row["elapsed_s"],
             wo,
-            n,
-            _read_uploads(con, r),
+            n_samples,
+            _read_uploads(con, row),
         )
     finally:
         if own:
@@ -365,8 +365,8 @@ def _read_uploads(con: sqlite3.Connection, session: sqlite3.Row) -> dict[str, Up
     """
     out: dict[str, UploadState] = {}
     try:
-        for u in con.execute("SELECT connection, remote_id, error FROM uploads"):
-            out[u["connection"]] = UploadState(u["remote_id"], u["error"])
+        for upload in con.execute("SELECT connection, remote_id, error FROM uploads"):
+            out[upload["connection"]] = UploadState(upload["remote_id"], upload["error"])
     except sqlite3.OperationalError:  # older session file without the uploads table
         pass
     if "intervals" not in out and (session["upload_id"] or session["upload_error"]):
@@ -384,11 +384,11 @@ def list_sessions(directory: Path) -> list[SessionInfo]:
         list[SessionInfo]: Sessions, most recent first.
     """
     out = []
-    for p in sorted(directory.glob("session-*.sqlite"), reverse=True):
+    for path in sorted(directory.glob("session-*.sqlite"), reverse=True):
         try:
-            out.append(read_info(p))
+            out.append(read_info(path))
         except Exception as exc:
-            log.warning("skipping unreadable session %s: %s", p.name, exc)
+            log.warning("skipping unreadable session %s: %s", path.name, exc)
     return out
 
 

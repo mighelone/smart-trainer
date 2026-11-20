@@ -14,7 +14,7 @@ class HistoryPoint:
     """One point of the live ride chart.
 
     Attributes:
-        x (float): Position on the chart's time axis: workout elapsed seconds, or
+        elapsed (float): Position on the chart's time axis: workout elapsed seconds, or
             active ride seconds in a free ride (what the session records as ``elapsed``).
         power (float | None): Power in watts.
         hr (int | None): Heart rate in bpm.
@@ -22,7 +22,7 @@ class HistoryPoint:
         target (float | None): Workout target power in watts.
     """
 
-    x: float
+    elapsed: float
     power: float | None
     hr: int | None
     cadence: float | None

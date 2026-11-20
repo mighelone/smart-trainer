@@ -102,16 +102,16 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
             _char (BleakGATTCharacteristic): Characteristic that sent the notification.
             data (bytearray): Raw notification payload.
         """
-        d = parse_indoor_bike_data(bytes(data))
-        if d.speed_kmh is not None:
-            self.speed_kmh = d.speed_kmh
+        bike = parse_indoor_bike_data(bytes(data))
+        if bike.speed_kmh is not None:
+            self.speed_kmh = bike.speed_kmh
         self.emit(
             Reading(
                 self.id,
-                power=d.power,
-                cadence=d.cadence_rpm,
-                speed_kmh=d.speed_kmh,
-                hr=d.heart_rate or None,
+                power=bike.power,
+                cadence=bike.cadence_rpm,
+                speed_kmh=bike.speed_kmh,
+                hr=bike.heart_rate or None,
             )
         )
 
@@ -142,12 +142,12 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
 
     async def _take_control(self) -> None:
         """Request control of the trainer and start it if granted."""
-        r = await self._write(cmd_request_control())
-        if r is not None and r.ok:
+        response = await self._write(cmd_request_control())
+        if response is not None and response.ok:
             await self._write(cmd_start())
             self.has_control = True
         else:
-            log.warning("%s: request control refused (%s)", self.name, r)
+            log.warning("%s: request control refused (%s)", self.name, response)
 
     async def _write(self, payload: bytes):
         """Write a control point command and wait for its response.
@@ -188,11 +188,13 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
             return False
         if not self.has_control:
             await self._take_control()
-        r = await self._write(payload)
-        if r is not None and r.result == ResultCode.CONTROL_NOT_PERMITTED:  # retake once
+        response = await self._write(payload)
+        if (
+            response is not None and response.result == ResultCode.CONTROL_NOT_PERMITTED
+        ):  # retake once
             await self._take_control()
-            r = await self._write(payload)
-        return bool(r and r.ok)
+            response = await self._write(payload)
+        return bool(response and response.ok)
 
     async def set_erg(self, watts: float) -> None:
         """Set ERG mode with a target power.
@@ -265,16 +267,18 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
             await self._take_control()
         while not self._status.empty():
             self._status.get_nowait()
-        r = await self._write(cmd_spin_down(start=True))
-        if r is not None and r.result == ResultCode.CONTROL_NOT_PERMITTED:  # retake once
+        response = await self._write(cmd_spin_down(start=True))
+        if (
+            response is not None and response.result == ResultCode.CONTROL_NOT_PERMITTED
+        ):  # retake once
             await self._take_control()
-            r = await self._write(cmd_spin_down(start=True))
-        if r is None:
+            response = await self._write(cmd_spin_down(start=True))
+        if response is None:
             raise CalibrationError("The trainer did not answer the spin-down request." + hint)
-        if not r.ok:
-            why = result_text(r.result)
+        if not response.ok:
+            why = result_text(response.result)
             raise CalibrationError(f"The trainer refused the spin-down ({why})." + hint)
-        low, high = parse_spin_down_targets(r.params) or (None, None)
+        low, high = parse_spin_down_targets(response.params) or (None, None)
         try:
             return await self._run_spin_down(on_progress, low, high)
         finally:

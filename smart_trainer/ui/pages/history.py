@@ -33,19 +33,19 @@ def upload_chip(name: str, state: UploadState | None) -> None:
         ui.tooltip(tip)
 
 
-def session_icon(s: SessionInfo) -> tuple[str, str]:
+def session_icon(session: SessionInfo) -> tuple[str, str]:
     """Icon and color for a session's status.
 
     Args:
-        s (SessionInfo): The session.
+        session (SessionInfo): The session.
 
     Returns:
         tuple[str, str]: Material icon name and color.
     """
-    if s.status == "finished":
-        done = any(u.done for u in s.uploads.values())
+    if session.status == "finished":
+        done = any(u.done for u in session.uploads.values())
         return ("cloud_done", "positive") if done else ("save", "primary")
-    if s.status == "active":
+    if session.status == "active":
         return "warning", "warning"
     return "help", "grey"
 
@@ -94,8 +94,8 @@ class HistoryPage:
         with self.listing:
             if not sessions:
                 ui.label("No sessions recorded yet.").classes("hint")
-            for s in sessions[: self.limit]:
-                self._session_card(s, uploaders)
+            for session in sessions[: self.limit]:
+                self._session_card(session, uploaders)
         self.more.set_visibility(len(sessions) > self.limit)
 
     async def load_more(self) -> None:
@@ -103,43 +103,49 @@ class HistoryPage:
         self.limit += self.PAGE_SIZE
         await self.render()
 
-    def _session_card(self, s: SessionInfo, uploaders: list[Connection]) -> None:
+    def _session_card(self, session: SessionInfo, uploaders: list[Connection]) -> None:
         """Render one session with its upload state and, if needed, an upload button.
 
         Args:
-            s (SessionInfo): The session.
+            session (SessionInfo): The session.
             uploaders (list[Connection]): Connections that can upload rides.
         """
         names = {c.id: c.name for c in uploaders}
         with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
-            icon, color = session_icon(s)
+            icon, color = session_icon(session)
             ui.icon(icon, color=color, size="sm")
             with ui.column().classes("gap-0"):
-                ui.label(s.name).classes("list-title")
-                when = f"{s.started:%a %d %b %Y %H:%M}"
-                ui.label(f"{when} · {fmt_time(s.elapsed_s)} · {s.status}").classes("list-sub")
-                shown = [c.id for c in uploaders if c.usable or c.id in s.uploads]
-                shown += [cid for cid in s.uploads if cid not in shown]
-                if s.status == "finished" and shown:
+                ui.label(session.name).classes("list-title")
+                when = f"{session.started:%a %d %b %Y %H:%M}"
+                ui.label(f"{when} · {fmt_time(session.elapsed_s)} · {session.status}").classes(
+                    "list-sub"
+                )
+                shown = [c.id for c in uploaders if c.usable or c.id in session.uploads]
+                shown += [cid for cid in session.uploads if cid not in shown]
+                if session.status == "finished" and shown:
                     with ui.row().classes("gap-3"):
                         for cid in shown:
-                            upload_chip(names.get(cid, cid), s.uploads.get(cid))
+                            upload_chip(names.get(cid, cid), session.uploads.get(cid))
             ui.space()
-            pending = [c.name for c in uploaders if c.usable and not s.uploaded(c.id)]
-            if s.status == "finished" and s.path.with_suffix(".fit").exists() and pending:
-                ui.button("Upload", icon="cloud_upload", on_click=lambda: self.upload(s)).props(
-                    "color=secondary"
-                ).tooltip("Upload to " + ", ".join(pending))
+            pending = [c.name for c in uploaders if c.usable and not session.uploaded(c.id)]
+            if (
+                session.status == "finished"
+                and session.path.with_suffix(".fit").exists()
+                and pending
+            ):
+                ui.button(
+                    "Upload", icon="cloud_upload", on_click=lambda: self.upload(session)
+                ).props("color=secondary").tooltip("Upload to " + ", ".join(pending))
 
-    async def upload(self, s: SessionInfo) -> None:
+    async def upload(self, session: SessionInfo) -> None:
         """Upload a finished session where it's still missing.
 
         Args:
-            s (SessionInfo): The session to upload.
+            session (SessionInfo): The session to upload.
         """
         seen = len(self.messages)
-        result = await self.store.upload_session(s)
+        result = await self.store.upload_session(session)
         ok = bool(result) and all(result.values())
-        for m in list(self.messages)[seen:]:
-            ui.notify(m, type="positive" if ok else "negative")
+        for message in list(self.messages)[seen:]:
+            ui.notify(message, type="positive" if ok else "negative")
         await self.render()

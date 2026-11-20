@@ -110,13 +110,13 @@ class CalibrationService:
         dev = self._devices[device_id]
         assert isinstance(dev, Calibratable)
 
-        def on_progress(p: CalibrationProgress) -> None:
+        def on_progress(progress: CalibrationProgress) -> None:
             """Publish a progress update.
 
             Args:
-                p (CalibrationProgress): The update.
+                progress (CalibrationProgress): The update.
             """
-            self.progress = p
+            self.progress = progress
 
         self.device_id = device_id
         self.progress = CalibrationProgress(CalibrationPhase.STARTING, "Starting…")

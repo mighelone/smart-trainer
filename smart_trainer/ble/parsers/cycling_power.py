@@ -41,21 +41,21 @@ def parse_cycling_power(data: bytes) -> CyclingPower:
     """
     flags = struct.unpack_from("<H", data, 0)[0]
     power = struct.unpack_from("<h", data, 2)[0]
-    i = 4
+    offset = 4
     balance = None
     if flags & 0x0001:  # pedal power balance present (1/2 %)
-        raw = data[i] / 2.0
-        i += 1
+        raw = data[offset] / 2.0
+        offset += 1
         # bit 1 = balance reference: 1 -> value refers to the LEFT pedal, 0 -> unknown
         balance = raw if flags & 0x0002 else None
     if flags & 0x0004:  # accumulated torque
-        i += 2
+        offset += 2
     if flags & 0x0010:  # wheel revolution data
-        i += 6
+        offset += 6
     crank_revs = crank_time = None
     if flags & 0x0020:  # crank revolution data
-        crank_revs, crank_time = struct.unpack_from("<HH", data, i)
-        i += 4
+        crank_revs, crank_time = struct.unpack_from("<HH", data, offset)
+        offset += 4
     return CyclingPower(
         power=power, balance_left_pct=balance, crank_revs=crank_revs, crank_event_time=crank_time
     )

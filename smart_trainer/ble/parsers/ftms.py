@@ -65,17 +65,17 @@ def parse_indoor_bike_data(data: bytes) -> IndoorBikeData:
         IndoorBikeData: Decoded fields; absent fields are ``None``.
     """
     flags = struct.unpack_from("<H", data, 0)[0]
-    i = 2
+    offset = 2
     out = IndoorBikeData()
     if not flags & 0x0001:  # bit0 == 0 means instantaneous speed IS present
-        out.speed_kmh = struct.unpack_from("<H", data, i)[0] / 100.0
-        i += 2
+        out.speed_kmh = struct.unpack_from("<H", data, offset)[0] / 100.0
+        offset += 2
     for flag, attr, size, decode in _IBD_FIELDS:
         if not flags & flag:
             continue
         if attr is not None and decode is not None:
-            setattr(out, attr, decode(data, i))
-        i += size
+            setattr(out, attr, decode(data, offset))
+        offset += size
     return out
 
 
