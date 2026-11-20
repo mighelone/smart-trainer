@@ -127,8 +127,8 @@ class CalibrationDialog:
             title = "Spin-down calibration" if spin_down else "Zero-offset calibration"
             ui.label(f"{title}: {dev.name}").classes("text-xl font-bold")
             with ui.column().classes("gap-1"):
-                for i, text in enumerate(CALIBRATION_STEPS[dev.CALIBRATION], 1):
-                    ui.label(f"{i}. {text}")
+                for number, text in enumerate(CALIBRATION_STEPS[dev.CALIBRATION], 1):
+                    ui.label(f"{number}. {text}")
             with ui.column().classes("w-full gap-1") as self.live:
                 self.phase_lbl = ui.label().classes("text-lg font-semibold")
                 self.msg_lbl = ui.label()
@@ -164,17 +164,17 @@ class CalibrationDialog:
         task = self.task
         running = task is not None and not task.done()
         self._update_buttons(running)
-        p = self.calibration.progress
-        if task is None or p is None:
+        progress = self.calibration.progress
+        if task is None or progress is None:
             return
         self.live.set_visibility(running)
         if running:
-            self._show_progress(p)
-        elif p.phase == CalibrationPhase.DONE:
-            self.result_lbl.set_text(f"✓ {p.message}")
+            self._show_progress(progress)
+        elif progress.phase == CalibrationPhase.DONE:
+            self.result_lbl.set_text(f"✓ {progress.message}")
             self.result_lbl.classes(replace="text-base text-positive font-semibold")
         else:
-            self.result_lbl.set_text(f"✗ {p.message}")
+            self.result_lbl.set_text(f"✗ {progress.message}")
             self.result_lbl.classes(replace="text-base text-negative font-semibold")
 
     def _update_buttons(self, running: bool) -> None:
@@ -193,28 +193,28 @@ class CalibrationDialog:
         self.cancel_btn.set_visibility(running)
         self.close_btn.set_visibility(not running)
 
-    def _show_progress(self, p: CalibrationProgress) -> None:
+    def _show_progress(self, progress: CalibrationProgress) -> None:
         """Show the phase, instruction, speed and progress of a running calibration.
 
         Args:
-            p (CalibrationProgress): Latest progress.
+            progress (CalibrationProgress): Latest progress.
         """
-        self.phase_lbl.set_text(PHASE_LABEL.get(p.phase, p.phase.value))
-        self.msg_lbl.set_text(p.message)
-        if p.speed_kmh is not None:
+        self.phase_lbl.set_text(PHASE_LABEL.get(progress.phase, progress.phase.value))
+        self.msg_lbl.set_text(progress.message)
+        if progress.speed_kmh is not None:
             target = (
-                f" / target {p.target_low_kmh:.0f}-{p.target_high_kmh:.0f} km/h"
-                if p.target_low_kmh and p.target_high_kmh
+                f" / target {progress.target_low_kmh:.0f}-{progress.target_high_kmh:.0f} km/h"
+                if progress.target_low_kmh and progress.target_high_kmh
                 else ""
             )
-            self.speed_lbl.set_text(f"{p.speed_kmh:.1f} km/h{target}")
+            self.speed_lbl.set_text(f"{progress.speed_kmh:.1f} km/h{target}")
         else:
             self.speed_lbl.set_text("")
-        if p.fraction is None:
+        if progress.fraction is None:
             self.bar.props("indeterminate")
         else:
             self.bar.props(remove="indeterminate")
-            self.bar.set_value(p.fraction)
+            self.bar.set_value(progress.fraction)
         self.result_lbl.set_text("")
 
 
@@ -340,43 +340,47 @@ class DevicesPage:
         with self.found:
             if not results:
                 ui.label("Nothing found.").classes("hint")
-            for r in results:
-                self._found_card(r)
+            for found in results:
+                self._found_card(found)
 
-    def _found_card(self, r: Discovered) -> None:
+    def _found_card(self, found: Discovered) -> None:
         """Render one discovered device with a button per role it can take.
 
         Args:
-            r (Discovered): The discovered device.
+            found (Discovered): The discovered device.
         """
         with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
             with ui.column().classes("gap-0"):
-                ui.label(r.name).classes("list-title")
-                ui.label(f"{', '.join(sorted(r.roles))} · RSSI {r.rssi}").classes("list-sub")
+                ui.label(found.name).classes("list-title")
+                ui.label(f"{', '.join(sorted(found.roles))} · RSSI {found.rssi}").classes(
+                    "list-sub"
+                )
             ui.space()
-            driver = DRIVERS[r.drivers[0]]
+            driver = DRIVERS[found.drivers[0]]
             for role in USE_LABEL:
                 if role in driver.ROLES:
                     ui.button(
                         USE_LABEL[role],
                         icon=ROLE_ICON[role],
-                        on_click=lambda role=role: self.use(r, role),
+                        on_click=lambda role=role: self.use(found, role),
                     ).props("color=secondary")
 
-    def use(self, r: Discovered, role: Role) -> None:
+    def use(self, found: Discovered, role: Role) -> None:
         """Assign a discovered device to a role, pairing it if needed.
 
         Args:
-            r (Discovered): The discovered device.
+            found (Discovered): The discovered device.
             role (Role): The role to assign.
         """
         from smart_trainer.ble.scanner import make_device
 
-        dev = self.devices.get(r.address) or make_device(r.drivers[0], r.address, r.name)
+        dev = self.devices.get(found.address) or make_device(
+            found.drivers[0], found.address, found.name
+        )
         roles = roles_for(role, self.settings)
         if dev.id in self.devices:
             self.devices.assign(dev.id, roles)
         else:
             self.devices.pair(dev, roles)
-        ui.notify(f"{r.name} assigned to {role.value}")
+        ui.notify(f"{found.name} assigned to {role.value}")
         self.render_paired()

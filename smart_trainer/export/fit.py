@@ -29,16 +29,16 @@ from smart_trainer.core.recorder import Recorder
 GAP_S = 5.0  # a hole longer than this (pause, crash) becomes a timer stop/start
 
 
-def _ms(t: float) -> int:
+def _ms(seconds: float) -> int:
     """Convert unix seconds to integer milliseconds.
 
     Args:
-        t (float): Unix time in seconds.
+        seconds (float): Unix time in seconds.
 
     Returns:
         int: Unix time in milliseconds.
     """
-    return round(t * 1000)
+    return round(seconds * 1000)
 
 
 def _stats(rows) -> dict:
@@ -61,8 +61,8 @@ def _stats(rows) -> dict:
         Returns:
             float | None: The average, or ``None`` if no values.
         """
-        v = [r[key] for r in rows if r[key] is not None]
-        return sum(v) / len(v) if v else None
+        values = [r[key] for r in rows if r[key] is not None]
+        return sum(values) / len(values) if values else None
 
     def mx(key):
         """Maximum of a column, ignoring ``None``.
@@ -73,8 +73,8 @@ def _stats(rows) -> dict:
         Returns:
             float | None: The maximum, or ``None`` if no values.
         """
-        v = [r[key] for r in rows if r[key] is not None]
-        return max(v) if v else None
+        values = [r[key] for r in rows if r[key] is not None]
+        return max(values) if values else None
 
     return {
         "avg_power": avg("power"),
@@ -95,7 +95,7 @@ def _fill_summary(msg, rows, start: float, end: float, timer_s: float) -> None:
         end (float): Unix end time.
         timer_s (float): Total timer time in seconds.
     """
-    s = _stats(rows)
+    stats = _stats(rows)
     msg.start_time = _ms(start)
     msg.timestamp = _ms(end)
     msg.total_elapsed_time = end - start
@@ -103,14 +103,14 @@ def _fill_summary(msg, rows, start: float, end: float, timer_s: float) -> None:
     msg.total_distance = (rows[-1]["distance_m"] or 0) - (rows[0]["distance_m"] or 0)
     msg.sport = Sport.CYCLING
     msg.sub_sport = SubSport.INDOOR_CYCLING
-    if s["avg_power"] is not None:
-        msg.avg_power = round(s["avg_power"])
-        msg.max_power = round(s["max_power"])
-    if s["avg_hr"] is not None:
-        msg.avg_heart_rate = round(s["avg_hr"])
-        msg.max_heart_rate = round(s["max_hr"])
-    if s["avg_cad"] is not None:
-        msg.avg_cadence = round(s["avg_cad"])
+    if stats["avg_power"] is not None:
+        msg.avg_power = round(stats["avg_power"])
+        msg.max_power = round(stats["max_power"])
+    if stats["avg_hr"] is not None:
+        msg.avg_heart_rate = round(stats["avg_hr"])
+        msg.max_heart_rate = round(stats["max_hr"])
+    if stats["avg_cad"] is not None:
+        msg.avg_cadence = round(stats["avg_cad"])
 
 
 def _file_id(start: float) -> FileIdMessage:
@@ -131,70 +131,70 @@ def _file_id(start: float) -> FileIdMessage:
     return fid
 
 
-def _timer_event(t: float, et: EventType) -> EventMessage:
+def _timer_event(timestamp: float, et: EventType) -> EventMessage:
     """Build a timer event message.
 
     Args:
-        t (float): Unix time of the event.
+        timestamp (float): Unix time of the event.
         et (EventType): Event type (start or stop).
 
     Returns:
         EventMessage: The timer event.
     """
-    e = EventMessage()
-    e.event = Event.TIMER
-    e.event_type = et
-    e.timestamp = _ms(t)
-    return e
+    event = EventMessage()
+    event.event = Event.TIMER
+    event.event_type = et
+    event.timestamp = _ms(timestamp)
+    return event
 
 
-def _record(r) -> RecordMessage:
+def _record(row) -> RecordMessage:
     """Build a FIT record message from one sample.
 
     Args:
-        r (sqlite3.Row): Recorded sample.
+        row (sqlite3.Row): Recorded sample.
 
     Returns:
         RecordMessage: The record, with only the fields the sample has.
     """
-    m = RecordMessage()
-    m.timestamp = _ms(r["t"])
-    if r["power"] is not None:
-        m.power = round(r["power"])
-    if r["hr"] is not None:
-        m.heart_rate = int(r["hr"])
-    if r["cadence"] is not None:
-        m.cadence = round(r["cadence"])
-    if r["speed_kmh"] is not None:
-        m.speed = r["speed_kmh"] / 3.6
-    if r["distance_m"] is not None:
-        m.distance = r["distance_m"]
-    return m
+    record = RecordMessage()
+    record.timestamp = _ms(row["t"])
+    if row["power"] is not None:
+        record.power = round(row["power"])
+    if row["hr"] is not None:
+        record.heart_rate = int(row["hr"])
+    if row["cadence"] is not None:
+        record.cadence = round(row["cadence"])
+    if row["speed_kmh"] is not None:
+        record.speed = row["speed_kmh"] / 3.6
+    if row["distance_m"] is not None:
+        record.distance = row["distance_m"]
+    return record
 
 
-def _add_records(b: FitFileBuilder, rows) -> float:
+def _add_records(builder: FitFileBuilder, rows) -> float:
     """Add the records, with timer stop/start events around gaps longer than ``GAP_S``.
 
     Args:
-        b (FitFileBuilder): Builder to add the messages to.
+        builder (FitFileBuilder): Builder to add the messages to.
         rows (list[sqlite3.Row]): Unpaused samples, in time order.
 
     Returns:
         float: Total timer time in seconds (gaps excluded).
     """
-    b.add(_timer_event(rows[0]["t"], EventType.START))
+    builder.add(_timer_event(rows[0]["t"], EventType.START))
     timer_s, prev = 0.0, None
-    for r in rows:
+    for row in rows:
         if prev is not None:
-            gap = r["t"] - prev
+            gap = row["t"] - prev
             if gap > GAP_S:
-                b.add(_timer_event(prev, EventType.STOP_ALL))
-                b.add(_timer_event(r["t"], EventType.START))
+                builder.add(_timer_event(prev, EventType.STOP_ALL))
+                builder.add(_timer_event(row["t"], EventType.START))
             else:
                 timer_s += gap
-        b.add(_record(r))
-        prev = r["t"]
-    b.add(_timer_event(rows[-1]["t"], EventType.STOP_ALL))
+        builder.add(_record(row))
+        prev = row["t"]
+    builder.add(_timer_event(rows[-1]["t"], EventType.STOP_ALL))
     return timer_s
 
 
@@ -208,12 +208,12 @@ def _laps(rows) -> list[LapMessage]:
         list[LapMessage]: Lap messages, ordered by lap number.
     """
     laps: dict[int, list] = {}
-    for r in rows:
-        laps.setdefault(r["lap"], []).append(r)
+    for row in rows:
+        laps.setdefault(row["lap"], []).append(row)
     out = []
-    for i, (_, lr) in enumerate(sorted(laps.items())):
+    for index, (_, lr) in enumerate(sorted(laps.items())):
         lap = LapMessage()
-        lap.message_index = i
+        lap.message_index = index
         lap.event = Event.LAP
         lap.event_type = EventType.STOP
         lap.lap_trigger = LapTrigger.MANUAL
@@ -285,15 +285,15 @@ def export_fit(rec: Recorder, out_path: Path) -> Path:
     if not rows:
         raise ValueError("session has no samples")
 
-    b = FitFileBuilder(auto_define=True, min_string_size=50)
-    b.add(_file_id(rows[0]["t"]))
-    timer_s = _add_records(b, rows)
+    builder = FitFileBuilder(auto_define=True, min_string_size=50)
+    builder.add(_file_id(rows[0]["t"]))
+    timer_s = _add_records(builder, rows)
     laps = _laps(rows)
     for lap in laps:
-        b.add(lap)
-    b.add(_session(rows, timer_s, len(laps)))
-    b.add(_activity(rows[-1]["t"], timer_s))
+        builder.add(lap)
+    builder.add(_session(rows, timer_s, len(laps)))
+    builder.add(_activity(rows[-1]["t"], timer_s))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    b.build().to_file(str(out_path))
+    builder.build().to_file(str(out_path))
     return out_path

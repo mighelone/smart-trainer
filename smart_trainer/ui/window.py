@@ -50,12 +50,12 @@ class NativeWindow(Protocol):
         """
         ...
 
-    def move(self, x: int, y: int) -> None:
+    def move(self, left: int, top: int) -> None:
         """Move the window.
 
         Args:
-            x (int): Left edge in pixels.
-            y (int): Top edge in pixels.
+            left (int): Left edge in pixels.
+            top (int): Top edge in pixels.
         """
         ...
 
@@ -96,25 +96,25 @@ class MiniWindow:
 
     async def enter(self) -> None:
         """Switch to the mini overlay: small, always-on-top window (native) and /mini."""
-        w = native_window()
-        if w is not None:
-            self._full_geometry = (await w.get_size(), await w.get_position())
-            w.set_always_on_top(True)
-            w.resize(*MINI_SIZE)
+        window = native_window()
+        if window is not None:
+            self._full_geometry = (await window.get_size(), await window.get_position())
+            window.set_always_on_top(True)
+            window.resize(*MINI_SIZE)
         ui.navigate.to("/mini")
 
     def restore_full(self) -> None:
         """Restore the normal window: not on top, previous size and position (native only)."""
-        w = native_window()
-        if w is None:
+        window = native_window()
+        if window is None:
             return
-        w.set_always_on_top(False)
+        window.set_always_on_top(False)
         if self._full_geometry:
-            (width, height), (x, y) = self._full_geometry
-            w.resize(width, height)
-            w.move(x, y)
+            (width, height), (left, top) = self._full_geometry
+            window.resize(width, height)
+            window.move(left, top)
         else:
-            w.resize(*FULL_SIZE)
+            window.resize(*FULL_SIZE)
 
     def exit(self) -> None:
         """Leave the mini overlay and go back to the full ride page."""

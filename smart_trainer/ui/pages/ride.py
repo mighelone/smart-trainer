@@ -159,25 +159,25 @@ class RidePage:
                 )
 
     # ---------------------------------------------------------- handlers
-    def set_manual_mode(self, m: str) -> None:
+    def set_manual_mode(self, value: str) -> None:
         """Switch the manual control mode and adapt the slider range.
 
         Args:
-            m (str): Mode value (``"resistance"``, ``"slope"`` or ``"erg"``).
+            value (str): Mode value (``"resistance"``, ``"slope"`` or ``"erg"``).
         """
-        controller, mode = self.controller, Mode(m)
+        controller, mode = self.controller, Mode(value)
         controller.set_target(mode, controller.target_for(mode))
         self.slider.props(MANUAL_SLIDER[mode])
         self.slider.value = controller.target_for(mode)
 
-    def set_manual_value(self, v: float) -> None:
+    def set_manual_value(self, value: float) -> None:
         """Apply the slider value to the current manual mode.
 
         Args:
-            v (float): Slider value (percent, grade or watts depending on mode).
+            value (float): Slider value (percent, grade or watts depending on mode).
         """
         controller = self.controller
-        controller.set_target(controller.mode, v)
+        controller.set_target(controller.mode, value)
 
     async def do_finish(self, dialog: ui.dialog, upload: bool) -> None:
         """Finish the ride and notify the result.
@@ -187,25 +187,27 @@ class RidePage:
             upload (bool): Whether to upload the ride to the connected services.
         """
         dialog.close()
-        n = ui.notification("Saving session…", spinner=True, timeout=None)
+        notification = ui.notification("Saving session…", spinner=True, timeout=None)
         seen = len(self.messages)
         fit = await self.ride.finish(upload=upload)
-        n.dismiss()
+        notification.dismiss()
         ui.notify(f"Saved {fit.name}" if fit else "Nothing recorded", type="positive")
-        for m in list(self.messages)[seen:]:
-            ui.notify(m)
+        for message in list(self.messages)[seen:]:
+            ui.notify(message)
 
     def confirm_finish(self) -> None:
         """Ask the rider how to finish the session."""
-        with ui.dialog() as d, ui.card():
+        with ui.dialog() as dialog, ui.card():
             ui.label("Finish this session?").classes("text-lg")
             with ui.row():
                 ui.button(
-                    "Save & upload", icon="cloud_upload", on_click=lambda: self.do_finish(d, True)
+                    "Save & upload",
+                    icon="cloud_upload",
+                    on_click=lambda: self.do_finish(dialog, True),
                 ).props("color=positive")
-                ui.button("Save only", icon="save", on_click=lambda: self.do_finish(d, False))
-                ui.button("Keep riding", on_click=d.close).props("flat")
-        d.open()
+                ui.button("Save only", icon="save", on_click=lambda: self.do_finish(dialog, False))
+                ui.button("Keep riding", on_click=dialog.close).props("flat")
+        dialog.open()
 
     # ----------------------------------------------------------- refresh
     def ensure_chart(self) -> None:
@@ -233,35 +235,35 @@ class RidePage:
         self.t_bal.set(
             f"{snap.balance_left:.0f}/{100 - snap.balance_left:.0f}" if snap.balance_left else "--"
         )
-        r = self.ride.runner
-        if r:
-            self._show_workout_step(r)
+        runner = self.ride.runner
+        if runner:
+            self._show_workout_step(runner)
         else:
             self._show_no_workout(riding)
         status = ride_status(self.live_ride)
         self.warn.set_text(" · ".join(status))
         self.warn.set_visibility(bool(status))
-        self._refresh_controls(riding, r is not None)
-        self._refresh_manual(manual=not (r and self.ride.erg_enabled))
+        self._refresh_controls(riding, runner is not None)
+        self._refresh_manual(manual=not (runner and self.ride.erg_enabled))
         self.cues.check()
 
-    def _show_workout_step(self, r: WorkoutRunner) -> None:
+    def _show_workout_step(self, runner: WorkoutRunner) -> None:
         """Show the elapsed time and the current/next interval of a running workout.
 
         Args:
-            r (WorkoutRunner): The workout runner.
+            runner (WorkoutRunner): The workout runner.
         """
-        i, st, into, left = r.current()
-        self.t_time.set(fmt_time(r.elapsed), f"of {fmt_time(r.workout.duration_s)}")
-        self.t_step.set(fmt_time(left), f"step {i + 1} of {len(r.workout.steps)}")
-        self.step_label.set_text(step_title(i, st))
-        nxt = r.next_step()
+        index, st, into, left = runner.current()
+        self.t_time.set(fmt_time(runner.elapsed), f"of {fmt_time(runner.workout.duration_s)}")
+        self.t_step.set(fmt_time(left), f"step {index + 1} of {len(runner.workout.steps)}")
+        self.step_label.set_text(step_title(index, st))
+        nxt = runner.next_step()
         if nxt:
-            self.next_label.set_text(f"Next · {next_step_text(nxt, r.ftp, r.intensity)}")
+            self.next_label.set_text(f"Next · {next_step_text(nxt, runner.ftp, runner.intensity)}")
         else:
             self.next_label.set_text("Last interval")
         self.step_bar.set_value(min(1.0, into / st.duration_s) if st.duration_s else 0)
-        self.intensity.set_text(f"{r.intensity * 100:.0f}%")
+        self.intensity.set_text(f"{runner.intensity * 100:.0f}%")
         self.step_card.set_visibility(True)
 
     def _show_no_workout(self, riding: bool) -> None:
@@ -288,8 +290,8 @@ class RidePage:
             workout (bool): Whether a workout is running.
         """
         self.btn_start.set_visibility(not riding)
-        for b in (self.btn_pause, self.btn_finish, self.btn_lap):
-            b.set_visibility(riding)
+        for button in (self.btn_pause, self.btn_finish, self.btn_lap):
+            button.set_visibility(riding)
         self.btn_skip.set_visibility(riding and workout)
         self.btn_pause.set_text("Resume" if self.ride.manual_pause else "Pause")
         self.erg.set_visibility(workout)
@@ -302,10 +304,12 @@ class RidePage:
             manual (bool): Whether the manual control is in use.
         """
         self.manual_box.set_visibility(manual)
-        c = self.controller
-        self.slider_label.set_text(f"{c.target_for(c.mode):g}{MANUAL_UNIT[c.mode.value]}")
-        if manual and self.mode.value != c.mode.value:
-            self.mode.value = c.mode.value
+        controller = self.controller
+        self.slider_label.set_text(
+            f"{controller.target_for(controller.mode):g}{MANUAL_UNIT[controller.mode.value]}"
+        )
+        if manual and self.mode.value != controller.mode.value:
+            self.mode.value = controller.mode.value
 
     def refresh_chart(self) -> None:
         """Send the new live power and heart-rate points to the chart."""
@@ -326,13 +330,13 @@ def build_ride_page(ctx: AppContext) -> None:
     Args:
         ctx (AppContext): The app's objects.
     """
-    e = ctx.engine
+    engine = ctx.engine
     if ctx.window.take_start_request():
-        if not e.ride.recoverable_sessions():
+        if not engine.ride.recoverable_sessions():
             ui.navigate.to("/mini")
             return
         ctx.window.restore_full()  # an unfinished session needs the full page's dialog
     frame(ctx, "Ride")
-    page = RidePage(LiveRide.of(e), e.messages, ctx.settings)
-    RecoveryDialog.offer(e.ride, e.store)
+    page = RidePage(LiveRide.of(engine), engine.messages, ctx.settings)
+    RecoveryDialog.offer(engine.ride, engine.store)
     ui.timer(0.5, page.loop)

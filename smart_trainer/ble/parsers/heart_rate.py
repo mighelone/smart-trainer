@@ -32,18 +32,18 @@ def parse_heart_rate(data: bytes) -> HeartRate:
         HeartRate: Decoded heart rate and RR intervals.
     """
     flags = data[0]
-    i = 1
+    offset = 1
     if flags & 0x01:
-        bpm = struct.unpack_from("<H", data, i)[0]
-        i += 2
+        bpm = struct.unpack_from("<H", data, offset)[0]
+        offset += 2
     else:
-        bpm = data[i]
-        i += 1
+        bpm = data[offset]
+        offset += 1
     if flags & 0x08:  # energy expended present
-        i += 2
+        offset += 2
     rr: list[float] = []
     if flags & 0x10:
-        while i + 1 < len(data):
-            rr.append(struct.unpack_from("<H", data, i)[0] * 1000.0 / 1024.0)
-            i += 2
+        while offset + 1 < len(data):
+            rr.append(struct.unpack_from("<H", data, offset)[0] * 1000.0 / 1024.0)
+            offset += 2
     return HeartRate(bpm=bpm, rr_intervals_ms=rr)

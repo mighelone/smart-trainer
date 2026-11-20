@@ -68,23 +68,23 @@ class PowerMatcher:
             float: Power command in watts, within ±max_offset_w of ``target``.
         """
         now = now if now is not None else time.monotonic()
-        c = self.cfg
+        cfg = self.cfg
         if self._last_target is None or abs(target - self._last_target) >= 1:
             self._last_target = target
             self._target_changed_at = now
-        settled = now - self._target_changed_at >= c.settle_s
-        riding = (snapshot.cadence or 0) >= c.min_cadence
+        settled = now - self._target_changed_at >= cfg.settle_s
+        riding = (snapshot.cadence or 0) >= cfg.min_cadence
         pedal_avg, trainer_avg = snapshot.pedal_avg, snapshot.trainer_avg
-        if settled and riding and pedal_avg and pedal_avg > c.min_power_w:
-            if trainer_avg and trainer_avg > c.min_power_w:
-                r = trainer_avg / pedal_avg
-                if c.ratio_min < r < c.ratio_max:
-                    self.ratio += (r - self.ratio) * c.ratio_alpha
+        if settled and riding and pedal_avg and pedal_avg > cfg.min_power_w:
+            if trainer_avg and trainer_avg > cfg.min_power_w:
+                ratio = trainer_avg / pedal_avg
+                if cfg.ratio_min < ratio < cfg.ratio_max:
+                    self.ratio += (ratio - self.ratio) * cfg.ratio_alpha
             error = target - pedal_avg
-            self.integral += c.ki * error
-            self.integral = max(-c.max_offset_w, min(c.max_offset_w, self.integral))
+            self.integral += cfg.ki * error
+            self.integral = max(-cfg.max_offset_w, min(cfg.max_offset_w, self.integral))
         cmd = target * self.ratio + self.integral
-        return max(target - c.max_offset_w, min(target + c.max_offset_w, cmd))
+        return max(target - cfg.max_offset_w, min(target + cfg.max_offset_w, cmd))
 
 
 # ERG spiral guard: in ERG mode a falling cadence makes the trainer brake harder (it holds

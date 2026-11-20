@@ -16,26 +16,25 @@ def fmt_time(seconds: float | None) -> str:
     """
     if seconds is None:
         return "--:--"
-    s = int(max(0, seconds))
-    h, rem = divmod(s, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+    hours, rem = divmod(int(max(0, seconds)), 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
-def fmt(v, digits: int = 0, unit: str = "") -> str:
+def fmt(value, digits: int = 0, unit: str = "") -> str:
     """Format a number with a fixed number of decimals and an optional unit.
 
     Args:
-        v (float | int | None): Value to format.
+        value (float | int | None): Value to format.
         digits (int): Number of decimal places.
         unit (str): Unit suffix appended to the value.
 
     Returns:
         str: The formatted value, or ``"--"`` if ``None``.
     """
-    if v is None:
+    if value is None:
         return "--"
-    return f"{v:.{digits}f}{unit}"
+    return f"{value:.{digits}f}{unit}"
 
 
 def next_step_text(step: Step, ftp: int, intensity: float = 1.0) -> str:

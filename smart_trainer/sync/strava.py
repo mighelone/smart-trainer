@@ -139,11 +139,11 @@ class StravaClient:
         Returns:
             dict[str, Any]: The token response.
         """
-        r = await self._client.post(
+        response = await self._client.post(
             self._token_url,
             data={"client_id": self.client_id, "client_secret": self.client_secret, **params},
         )
-        if r.status_code in {
+        if response.status_code in {
             httpx.codes.BAD_REQUEST,
             httpx.codes.UNAUTHORIZED,
             httpx.codes.FORBIDDEN,
@@ -152,9 +152,9 @@ class StravaClient:
                 "Strava rejected the authorization: check the Client ID/Secret and "
                 "reconnect in Settings"
             )
-        if r.is_error:
-            raise StravaError(f"Strava error {r.status_code}: {r.text[:200]}")
-        data = r.json()
+        if response.is_error:
+            raise StravaError(f"Strava error {response.status_code}: {response.text[:200]}")
+        data = response.json()
         self._access = data["access_token"]
         self._expires_at = float(data.get("expires_at") or 0)
         self.refresh_token = data.get("refresh_token") or self.refresh_token
@@ -203,14 +203,14 @@ class StravaClient:
             httpx.Response: The successful response.
         """
         headers = {"Authorization": f"Bearer {await self._access_token()}"}
-        r = await self._client.request(method, url, headers=headers, **kw)
-        if r.status_code == httpx.codes.UNAUTHORIZED:
+        response = await self._client.request(method, url, headers=headers, **kw)
+        if response.status_code == httpx.codes.UNAUTHORIZED:
             raise StravaError("Strava authorization expired or revoked: reconnect in Settings")
-        if r.status_code == httpx.codes.TOO_MANY_REQUESTS:
+        if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
             raise StravaError("Strava rate limit reached: try again later")
-        if r.is_error:
-            raise StravaError(f"Strava error {r.status_code}: {r.text[:200]}")
-        return r
+        if response.is_error:
+            raise StravaError(f"Strava error {response.status_code}: {response.text[:200]}")
+        return response
 
     # -------------------------------------------------------------------- API
     async def athlete(self) -> dict[str, Any]:
@@ -244,21 +244,21 @@ class StravaClient:
         if ride.description:
             data["description"] = ride.description
         with ride.fit_path.open("rb") as fh:
-            r = await self._request(
+            response = await self._request(
                 "POST",
                 "/uploads",
                 data=data,
                 files={"file": (ride.fit_path.name, fh, "application/octet-stream")},
             )
-        status = r.json()
+        status = response.json()
         deadline = time.monotonic() + self._poll_timeout
         while True:
             if status.get("activity_id"):
                 return str(status["activity_id"])
             if error := status.get("error"):
-                if m := _DUPLICATE.search(str(error)):
-                    log.info("Strava already has this ride: activity %s", m.group(1))
-                    return m.group(1)
+                if match := _DUPLICATE.search(str(error)):
+                    log.info("Strava already has this ride: activity %s", match.group(1))
+                    return match.group(1)
                 raise StravaError(f"Strava could not process the ride: {error}")
             if time.monotonic() > deadline:
                 raise StravaError("Strava is still processing the ride: check strava.com later")
@@ -337,9 +337,9 @@ class StravaConnection(Connection):
         Returns:
             str: The connected athlete's name.
         """
-        async with self.client() as c:
-            data = await c.exchange_code(code)
-            self._keep_token(c)
+        async with self.client() as client:
+            data = await client.exchange_code(code)
+            self._keep_token(client)
         name = athlete_name(data.get("athlete") or {})
         self.options["athlete"] = name
         self.settings.save()
@@ -357,11 +357,11 @@ class StravaConnection(Connection):
         Returns:
             str: The athlete name.
         """
-        async with self.client() as c:
+        async with self.client() as client:
             try:
-                return athlete_name(await c.athlete())
+                return athlete_name(await client.athlete())
             finally:
-                self._keep_token(c)
+                self._keep_token(client)
 
     async def upload_activity(self, ride: RideUpload) -> str:
         """Upload a ride.
@@ -372,8 +372,8 @@ class StravaConnection(Connection):
         Returns:
             str: Id of the created activity.
         """
-        async with self.client() as c:
+        async with self.client() as client:
             try:
-                return await c.upload_activity(ride)
+                return await client.upload_activity(ride)
             finally:
-                self._keep_token(c)
+                self._keep_token(client)

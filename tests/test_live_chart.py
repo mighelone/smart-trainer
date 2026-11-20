@@ -79,7 +79,7 @@ def test_history_x_follows_the_workout_clock(ride):
     _ticks(ride, 2)
     ride.skip_step()
     _ticks(ride, 1, start=2)
-    assert [p.x for p in ride.history] == [1, 2, 61]  # the trace jumps with the skip
+    assert [p.elapsed for p in ride.history] == [1, 2, 61]  # the trace jumps with the skip
 
 
 def test_resume_restores_history_on_the_recorded_clock(tmp_path):
@@ -90,7 +90,7 @@ def test_resume_restores_history_on_the_recorded_clock(tmp_path):
     e2 = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
     [info] = e2.ride.recoverable_sessions()
     e2.ride.resume(info)
-    assert [p.x for p in e2.ride.history] == [1, 2, 3, 4]
+    assert [p.elapsed for p in e2.ride.history] == [1, 2, 3, 4]
     assert e2.ride.history.total == 4
     e2.ride.close()
 

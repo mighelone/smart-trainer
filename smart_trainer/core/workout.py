@@ -46,8 +46,8 @@ class Step:
         if self.free_ride:
             return None
         end = self.start if self.end is None else self.end
-        v = self.start + (end - self.start) * frac
-        return v * ftp if self.unit == "ftp" else v
+        target = self.start + (end - self.start) * frac
+        return target * ftp if self.unit == "ftp" else target
 
 
 @dataclass
@@ -85,21 +85,21 @@ class Workout:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> Workout:
+    def from_dict(cls, data: dict) -> Workout:
         """Build a workout from a dictionary produced by :meth:`to_dict`.
 
         Args:
-            d (dict): Dictionary with ``name`` and optional ``steps``,
+            data (dict): Dictionary with ``name`` and optional ``steps``,
                 ``description`` and ``source_id`` keys.
 
         Returns:
             Workout: The reconstructed workout.
         """
         return cls(
-            name=d["name"],
-            steps=[Step(**s) for s in d.get("steps", [])],
-            description=d.get("description", ""),
-            source_id=d.get("source_id"),
+            name=data["name"],
+            steps=[Step(**s) for s in data.get("steps", [])],
+            description=data.get("description", ""),
+            source_id=data.get("source_id"),
         )
 
     def step_starts(self) -> list[int]:
@@ -108,10 +108,10 @@ class Workout:
         Returns:
             list[int]: Start offset of each step in seconds from workout start.
         """
-        out, t = [], 0
-        for s in self.steps:
-            out.append(t)
-            t += s.duration_s
+        out, start = [], 0
+        for step in self.steps:
+            out.append(start)
+            start += step.duration_s
         return out
 
 
@@ -129,23 +129,23 @@ def zone_mid(zone: int, zones: list[int] | None = None) -> float:
     """
     if not zones:
         return ZONE_MID.get(zone, 0.6)
-    i = min(max(zone, 1), len(zones)) - 1
-    lower = zones[i - 1] / 100.0 if i > 0 else None
-    upper = zones[i] / 100.0
+    index = min(max(zone, 1), len(zones)) - 1
+    lower = zones[index - 1] / 100.0 if index > 0 else None
+    upper = zones[index] / 100.0
     if lower is None:  # Z1 starts at 0: aim near its top, not at 0.5 * upper
         return 0.9 * upper
-    if i == len(zones) - 1:  # open-ended top zone
+    if index == len(zones) - 1:  # open-ended top zone
         return lower + 0.10
     return (lower + upper) / 2
 
 
 def _icu_power(
-    p: dict | None, ftp: int, zones: list[int] | None = None
+    power: dict | None, ftp: int, zones: list[int] | None = None
 ) -> tuple[float, float | None, str] | None:
     """Convert an intervals.icu power target into step target values.
 
     Args:
-        p (dict | None): intervals.icu power target (``units``, ``value`` or
+        power (dict | None): intervals.icu power target (``units``, ``value`` or
             ``start``/``end``).
         ftp (int): Rider's functional threshold power in watts.
         zones (list[int] | None): Rider's power zone upper bounds (% of FTP).
@@ -154,11 +154,11 @@ def _icu_power(
         tuple[float, float | None, str] | None: ``(start, end, unit)`` tuple, or
         ``None`` if the target is missing or uses unsupported units.
     """
-    if not p:
+    if not power:
         return None
-    units = (p.get("units") or "%ftp").lower()
-    start = p.get("start", p.get("value"))
-    end = p.get("end") if "start" in p else None
+    units = (power.get("units") or "%ftp").lower()
+    start = power.get("start", power.get("value"))
+    end = power.get("end") if "start" in power else None
     if start is None:
         return None
     if units in ("%ftp", "percent_ftp"):
@@ -166,9 +166,9 @@ def _icu_power(
     if units in ("w", "watts"):
         return float(start), (float(end) if end is not None else None), "watts"
     if units in ("power_zone", "zone"):
-        s = zone_mid(int(round(start)), zones)
-        e = zone_mid(int(round(end)), zones) if end is not None else None
-        return s, e, "ftp"
+        start_mid = zone_mid(int(round(start)), zones)
+        end_mid = zone_mid(int(round(end)), zones) if end is not None else None
+        return start_mid, end_mid, "ftp"
     return None
 
 
@@ -237,6 +237,20 @@ def parse_intervals_doc(
 
 
 # ------------------------------------------------------------------ Zwift .zwo
+def _number(el: ET.Element, key: str, default: float = 0.0) -> float:
+    """Read a numeric attribute of a .zwo step element.
+
+    Args:
+        el (ET.Element): The step element.
+        key (str): Attribute name.
+        default (float): Value when the attribute is missing.
+
+    Returns:
+        float: The attribute's value.
+    """
+    return float(el.attrib.get(key, default))
+
+
 def parse_zwo(xml_text: str) -> Workout:
     """Parse a Zwift ``.zwo`` workout file.
 
@@ -258,19 +272,26 @@ def parse_zwo(xml_text: str) -> Workout:
         raise ValueError("no <workout> element")
     for el in container:
         tag = el.tag.lower()
-        a = el.attrib
-        f = lambda k, d=0.0, a=a: float(a.get(k, d))  # noqa: E731
-        cad = int(f("Cadence")) if "Cadence" in a else None
+        cad = int(_number(el, "Cadence")) if "Cadence" in el.attrib else None
         if tag == "steadystate":
-            steps.append(Step(int(f("Duration")), f("Power"), cadence=cad))
+            steps.append(Step(int(_number(el, "Duration")), _number(el, "Power"), cadence=cad))
         elif tag in ("warmup", "cooldown", "ramp"):
-            steps.append(Step(int(f("Duration")), f("PowerLow"), f("PowerHigh"), cadence=cad))
+            steps.append(
+                Step(
+                    int(_number(el, "Duration")),
+                    _number(el, "PowerLow"),
+                    _number(el, "PowerHigh"),
+                    cadence=cad,
+                )
+            )
         elif tag == "intervalst":
-            for _ in range(int(f("Repeat", 1))):
-                steps.append(Step(int(f("OnDuration")), f("OnPower"), cadence=cad))
-                steps.append(Step(int(f("OffDuration")), f("OffPower")))
+            for _ in range(int(_number(el, "Repeat", 1))):
+                steps.append(
+                    Step(int(_number(el, "OnDuration")), _number(el, "OnPower"), cadence=cad)
+                )
+                steps.append(Step(int(_number(el, "OffDuration")), _number(el, "OffPower")))
         elif tag in ("freeride", "maxeffort"):
-            steps.append(Step(int(f("Duration")), 0.0, free_ride=True))
+            steps.append(Step(int(_number(el, "Duration")), 0.0, free_ride=True))
     return Workout(name=name, steps=steps, description=desc)
 
 
@@ -326,9 +347,9 @@ class WorkoutRunner:
         Returns:
             int: Index of the current step (0 if the workout has no steps).
         """
-        for i in range(len(self._starts) - 1, -1, -1):
-            if self.elapsed >= self._starts[i]:
-                return i
+        for index in range(len(self._starts) - 1, -1, -1):
+            if self.elapsed >= self._starts[index]:
+                return index
         return 0
 
     def current(self) -> tuple[int, Step, float, float]:
@@ -338,10 +359,10 @@ class WorkoutRunner:
             tuple[int, Step, float, float]: ``(index, step, seconds into step,
             seconds remaining in step)``.
         """
-        i = min(self.step_index(), len(self.workout.steps) - 1)
-        st = self.workout.steps[i]
-        into = self.elapsed - self._starts[i]
-        return i, st, into, max(0.0, st.duration_s - into)
+        index = min(self.step_index(), len(self.workout.steps) - 1)
+        st = self.workout.steps[index]
+        into = self.elapsed - self._starts[index]
+        return index, st, into, max(0.0, st.duration_s - into)
 
     def next_step(self) -> Step | None:
         """Get the step following the current one.
@@ -349,8 +370,8 @@ class WorkoutRunner:
         Returns:
             Step | None: The next step, or ``None`` if on the last step.
         """
-        i = self.step_index() + 1
-        return self.workout.steps[i] if i < len(self.workout.steps) else None
+        index = self.step_index() + 1
+        return self.workout.steps[index] if index < len(self.workout.steps) else None
 
     def target_w(self) -> float | None:
         """Compute the current power target, scaled by ``intensity``.
@@ -362,14 +383,16 @@ class WorkoutRunner:
         if not self.workout.steps or self.finished:
             return None
         _, st, into, _ = self.current()
-        t = st.target_w(into / st.duration_s if st.duration_s else 0, self.ftp)
-        return None if t is None else t * self.intensity
+        target = st.target_w(into / st.duration_s if st.duration_s else 0, self.ftp)
+        return None if target is None else target * self.intensity
 
     def skip(self) -> None:
         """Jump to the start of the next step, or to the end of the workout."""
-        i = self.step_index() + 1
+        index = self.step_index() + 1
         self.elapsed = (
-            float(self._starts[i]) if i < len(self._starts) else float(self.workout.duration_s)
+            float(self._starts[index])
+            if index < len(self._starts)
+            else float(self.workout.duration_s)
         )
 
     def profile(self) -> list[tuple[int, float]]:
@@ -381,7 +404,7 @@ class WorkoutRunner:
         """
         pts: list[tuple[int, float]] = []
         for start, st in zip(self._starts, self.workout.steps, strict=True):
-            a = st.target_w(0, self.ftp) or 0
-            b = st.target_w(1, self.ftp) or 0
-            pts += [(start, a), (start + st.duration_s, b)]
+            start_w = st.target_w(0, self.ftp) or 0
+            end_w = st.target_w(1, self.ftp) or 0
+            pts += [(start, start_w), (start + st.duration_s, end_w)]
         return pts

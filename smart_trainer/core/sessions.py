@@ -91,18 +91,18 @@ class SessionStore:
         paths = sorted(self.directory.glob("session-*.sqlite"), reverse=True)
         present = set(paths)
         # keep entries of files not looked at this time; drop those gone (discarded)
-        cache = {p: v for p, v in self._cache.items() if p in present}
+        cache = {path: v for path, v in self._cache.items() if path in present}
         out = []
-        for p in paths[:limit]:
+        for path in paths[:limit]:
             try:
-                key = _stat_key(p)
-                hit = cache.get(p)
-                info = hit[1] if hit and hit[0] == key else read_info(p)
+                key = _stat_key(path)
+                hit = cache.get(path)
+                info = hit[1] if hit and hit[0] == key else read_info(path)
             except Exception as exc:  # unreadable, or moved away meanwhile
-                log.warning("skipping unreadable session %s: %s", p.name, exc)
-                cache.pop(p, None)
+                log.warning("skipping unreadable session %s: %s", path.name, exc)
+                cache.pop(path, None)
                 continue
-            cache[p] = (key, info)
+            cache[path] = (key, info)
             out.append(info)
         self._cache = cache  # replaced, never mutated: safe across worker threads
         return out
@@ -244,6 +244,6 @@ class SessionStore:
         dest = self.directory / "discarded"
         dest.mkdir(exist_ok=True)
         for suffix in ("", "-wal", "-shm"):
-            p = Path(str(info.path) + suffix)
-            if p.exists():
-                p.replace(dest / p.name)
+            path = Path(str(info.path) + suffix)
+            if path.exists():
+                path.replace(dest / path.name)

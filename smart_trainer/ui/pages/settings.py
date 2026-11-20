@@ -32,16 +32,18 @@ def profile_summary(st: Settings) -> str:
     lines = []
     if st.power_zones:
         parts = []
-        for i, pct in enumerate(st.power_zones):
-            name = f"Z{i + 1}"
-            if i == len(st.power_zones) - 1:
-                lower = st.power_zones[i - 1] if i else 0
+        for index, pct in enumerate(st.power_zones):
+            name = f"Z{index + 1}"
+            if index == len(st.power_zones) - 1:
+                lower = st.power_zones[index - 1] if index else 0
                 parts.append(f"{name} ≥{round(lower * st.ftp / 100)} W")
             else:
                 parts.append(f"{name} <{round(pct * st.ftp / 100)} W")
         lines.append("Power zones: " + " · ".join(parts))
     if st.hr_zones:
-        lines.append("HR zones: " + " · ".join(f"Z{i + 1} ≤{b}" for i, b in enumerate(st.hr_zones)))
+        lines.append(
+            "HR zones: " + " · ".join(f"Z{index + 1} ≤{b}" for index, b in enumerate(st.hr_zones))
+        )
     hr = [f"LTHR {st.lthr} bpm" if st.lthr else "", f"max HR {st.max_hr} bpm" if st.max_hr else ""]
     if any(hr):
         lines.append(" · ".join(x for x in hr if x))

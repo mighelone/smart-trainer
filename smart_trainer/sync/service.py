@@ -115,19 +115,21 @@ class SyncService:
             self._messages.append("Demo mode: uploads are disabled")
             raise SyncUnavailable("demo mode")
         conns = [
-            c
-            for c in self.connected(Capability.UPLOAD)
-            if (targets is None or c.id in targets) and c.id not in skip
+            conn
+            for conn in self.connected(Capability.UPLOAD)
+            if (targets is None or conn.id in targets) and conn.id not in skip
         ]
         if not conns:
             self._messages.append("No connection to upload to: saved locally only")
             raise SyncUnavailable("no connection")
-        outcomes = await asyncio.gather(*(self._upload_one(c, ride) for c in conns))
+        outcomes = await asyncio.gather(*(self._upload_one(conn, ride) for conn in conns))
         result: dict[str, UploadOutcome] = {}
-        for c, (aid, err) in zip(conns, outcomes, strict=True):
-            result[c.id] = (aid, err)
+        for conn, (aid, err) in zip(conns, outcomes, strict=True):
+            result[conn.id] = (aid, err)
             self._messages.append(
-                f"Uploaded to {c.name} ({aid})" if err is None else f"{c.name} upload failed: {err}"
+                f"Uploaded to {conn.name} ({aid})"
+                if err is None
+                else f"{conn.name} upload failed: {err}"
             )
         return result
 

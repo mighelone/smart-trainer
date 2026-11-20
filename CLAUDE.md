@@ -93,7 +93,8 @@ Conventions:
   doesn't count). A long function is usually several steps that want their own names.
 - Use a `Protocol` to define the contract when a class has more than one implementation (a
   test fake counts).
-- Use meaningful names, no names with one letter
+- Use meaningful names, no one-letter names, except for the variable of a one-line scope
+  (a comprehension or a lambda).
 - Comments explain **why**, not what: the reason, the constraint, the trade-off. If a comment
   restates the code, delete it, or rename things until it isn't needed.
 - Always comment:

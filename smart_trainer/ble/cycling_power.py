@@ -83,13 +83,20 @@ class PowerMeter(BleakDevice, Calibratable):
                 _char (BleakGATTCharacteristic): Characteristic that sent the notification.
                 data (bytearray): Raw notification payload.
             """
-            m = parse_cycling_power(bytes(data))
+            measurement = parse_cycling_power(bytes(data))
             now = time.monotonic()
             dt, last[0] = now - last[0], now
             rpm = None
-            if m.crank_revs is not None and m.crank_event_time is not None:
-                rpm = cadence.update(m.crank_revs, m.crank_event_time, dt)
-            self.emit(Reading(self.id, power=m.power, cadence=rpm, balance_left=m.balance_left_pct))
+            if measurement.crank_revs is not None and measurement.crank_event_time is not None:
+                rpm = cadence.update(measurement.crank_revs, measurement.crank_event_time, dt)
+            self.emit(
+                Reading(
+                    self.id,
+                    power=measurement.power,
+                    cadence=rpm,
+                    balance_left=measurement.balance_left_pct,
+                )
+            )
 
         await client.start_notify(uuids.CYCLING_POWER_MEASUREMENT, handle)
 

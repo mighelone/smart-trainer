@@ -97,15 +97,15 @@ def zone_index(value: float, bounds: list[int] | tuple[int, ...]) -> int:
     Returns:
         int: Zone index, at most ``len(bounds) - 1``.
     """
-    for i, upper in enumerate(bounds):
+    for index, upper in enumerate(bounds):
         if value < upper:
-            return i
+            return index
     return len(bounds) - 1
 
 
-def _color(i: int) -> str:
+def _color(index: int) -> str:
     """Color of the ``i``-th zone (the last color repeats past seven zones)."""
-    return ZONE_COLORS[min(i, len(ZONE_COLORS) - 1)]
+    return ZONE_COLORS[min(index, len(ZONE_COLORS) - 1)]
 
 
 def zone_color(watts: float | None, ftp: int, zones: list[int] | None = None) -> str:
@@ -154,8 +154,8 @@ def power_zone(
     """
     if watts is None or ftp <= 0:
         return None, None
-    i = zone_index(watts / ftp * 100, zones or DEFAULT_POWER_ZONES)
-    return _color(i), f"Z{i + 1}"
+    index = zone_index(watts / ftp * 100, zones or DEFAULT_POWER_ZONES)
+    return _color(index), f"Z{index + 1}"
 
 
 def hr_zone(bpm: float | None, hr_zones: list[int]) -> tuple[str | None, str | None]:
@@ -170,8 +170,8 @@ def hr_zone(bpm: float | None, hr_zones: list[int]) -> tuple[str | None, str | N
     """
     if bpm is None or not hr_zones:
         return None, None
-    i = zone_index(bpm, hr_zones)
-    return _color(i), f"Z{i + 1}"
+    index = zone_index(bpm, hr_zones)
+    return _color(index), f"Z{index + 1}"
 
 
 CADENCE_ALERT_COLOR = "#f59e0b"  # amber, like a device that's still connecting

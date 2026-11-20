@@ -142,7 +142,7 @@ class WorkoutsPage:
             except Exception as exc:
                 log.warning("could not load workouts from %s: %s", conn.name, exc)
                 errors.append(f"Could not load workouts from {conn.name}: {exc}")
-        planned.sort(key=lambda p: p.day)
+        planned.sort(key=lambda planned_workout: planned_workout.day)
         text = (
             f"{len(planned)} cycling workouts planned"
             if planned
@@ -150,6 +150,10 @@ class WorkoutsPage:
         )
         self.status.set_text(" · ".join(errors) if errors and not planned else text)
         with self.listing:
-            for p in planned:
-                label = "Today" if p.day == date.today() else p.day.strftime("%a %d %b")
-                self.workout_card(p.workout, label)
+            for planned_workout in planned:
+                label = (
+                    "Today"
+                    if planned_workout.day == date.today()
+                    else planned_workout.day.strftime("%a %d %b")
+                )
+                self.workout_card(planned_workout.workout, label)
