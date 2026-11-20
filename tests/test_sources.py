@@ -88,7 +88,7 @@ def test_hub_publishes_and_persists_assignment():
     assert config.power_source == "trainer" and config.saves == 2
 
 
-# ------------------------------------------------------------- power_mean (recorded)
+# ------------------------------------------------------- power_mean: the recorded mean
 PEDALS_ONLY = Assignment({Role.POWER: PEDALS})
 TRAINER_AND_PEDALS = BOTH
 
