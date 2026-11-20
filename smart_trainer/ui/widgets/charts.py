@@ -9,6 +9,9 @@ from nicegui import ui
 from smart_trainer.core.history import History, HistoryPoint
 from smart_trainer.core.workout import Workout, WorkoutRunner
 
+MUTED = "#8a96a3"  # axis labels and text
+AXIS_LABEL = {"color": MUTED, "fontSize": 11}
+
 
 def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live: bool = True):
     """Create an ECharts chart of the workout target, optionally with live series.
@@ -22,47 +25,11 @@ def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live:
     Returns:
         ui.echart: The chart element.
     """
-    total = workout.duration_s if workout else 600
-    series = [
-        {
-            "type": "line",
-            "name": "Target",
-            "data": [],
-            "step": False,
-            "showSymbol": False,
-            "lineStyle": {"width": 1, "color": "#4f8cff", "opacity": 0.8},
-            "areaStyle": {"opacity": 0.28, "color": "#4f8cff"},
-            "z": 1,
-        },
-        {
-            "type": "line",
-            "name": "Power",
-            "data": [],
-            "showSymbol": False,
-            "lineStyle": {"width": 1.5, "color": "#facc15"},
-            "sampling": "lttb",  # drawn downsampled in the browser, keeping the peaks
-            "z": 3,
-        },
-        {
-            "type": "line",
-            "name": "HR",
-            "data": [],
-            "showSymbol": False,
-            "yAxisIndex": 1,
-            "lineStyle": {"width": 1.5, "color": "#f43f5e"},
-            "sampling": "lttb",
-            "z": 2,
-        },
-    ]
-    if workout:
-        pts = WorkoutRunner(workout, ftp).profile()
-        series[0]["data"] = [[t, round(w)] for t, w in pts]
-    muted = "#8a96a3"
-    axis_label = {"color": muted, "fontSize": 11}
+    series = _series(workout, ftp)
     opts = {
         "animation": False,
         "backgroundColor": "transparent",
-        "textStyle": {"color": muted},
+        "textStyle": {"color": MUTED},
         "grid": {"left": 42, "right": 42, "top": 22, "bottom": 24},
         "tooltip": {
             "trigger": "axis",
@@ -70,42 +37,114 @@ def workout_chart(workout: Workout | None, ftp: int, height: str = "h-64", live:
             "borderColor": "rgba(255,255,255,0.08)",
             "textStyle": {"color": "#e8edf2"},
         },
-        "xAxis": {
-            "type": "value",
-            "min": 0,
-            "max": total,
-            "axisLabel": {**axis_label, ":formatter": 'v => Math.floor(v / 60) + "\'"'},
-            "axisLine": {"lineStyle": {"color": "rgba(255,255,255,0.12)"}},
-            "axisTick": {"show": False},
-            "splitLine": {"show": False},
-        },
-        "yAxis": [
-            {
-                "type": "value",
-                "name": "W",
-                "min": 0,
-                "nameTextStyle": axis_label,
-                "axisLabel": axis_label,
-                "splitLine": {"lineStyle": {"color": "rgba(255,255,255,0.06)"}},
-            },
-            {
-                "type": "value",
-                "name": "bpm",
-                "min": 60,
-                "max": 200,
-                "nameTextStyle": axis_label,
-                "axisLabel": axis_label,
-                "splitLine": {"show": False},
-            },
-        ],
+        "xAxis": _time_axis(workout.duration_s if workout else 600),
+        "yAxis": _value_axes(),
         "series": series if live else series[:1],
     }
-    if not live:  # compact preview: power axis only, no gridlines
-        opts["yAxis"] = opts["yAxis"][:1]
-        opts["yAxis"][0].update(name="", splitNumber=2, splitLine={"show": False})
-        opts["grid"].update(top=8, right=12)
-    chart = ui.echart(opts).classes(f"w-full {height}")
-    return chart
+    if not live:
+        _make_compact(opts)
+    return ui.echart(opts).classes(f"w-full {height}")
+
+
+def _series(workout: Workout | None, ftp: int) -> list[dict]:
+    """Chart series: the workout target (filled), then live power and heart rate (empty).
+
+    Args:
+        workout (Workout | None): Workout whose target profile fills the first series.
+        ftp (int): Rider's FTP in watts.
+
+    Returns:
+        list[dict]: The ECharts series.
+    """
+    target = _line("Target", "#4f8cff", 1, step=False, z=1)
+    target["lineStyle"]["opacity"] = 0.8
+    target["areaStyle"] = {"opacity": 0.28, "color": "#4f8cff"}
+    if workout:
+        target["data"] = [[t, round(w)] for t, w in WorkoutRunner(workout, ftp).profile()]
+    # lttb: drawn downsampled in the browser, keeping the peaks
+    power = _line("Power", "#facc15", 1.5, sampling="lttb", z=3)
+    hr = _line("HR", "#f43f5e", 1.5, yAxisIndex=1, sampling="lttb", z=2)
+    return [target, power, hr]
+
+
+def _line(name: str, color: str, width: float, **extra: object) -> dict:
+    """An empty line series without point symbols.
+
+    Args:
+        name (str): Series name (legend and tooltip).
+        color (str): Line colour.
+        width (float): Line width in pixels.
+        **extra (object): More ECharts series options.
+
+    Returns:
+        dict: The ECharts series.
+    """
+    return {
+        "type": "line",
+        "name": name,
+        "data": [],
+        "showSymbol": False,
+        "lineStyle": {"width": width, "color": color},
+        **extra,
+    }
+
+
+def _time_axis(total_s: int) -> dict:
+    """X axis: elapsed time, labelled in minutes.
+
+    Args:
+        total_s (int): Axis length in seconds.
+
+    Returns:
+        dict: The ECharts axis.
+    """
+    return {
+        "type": "value",
+        "min": 0,
+        "max": total_s,
+        "axisLabel": {**AXIS_LABEL, ":formatter": 'v => Math.floor(v / 60) + "\'"'},
+        "axisLine": {"lineStyle": {"color": "rgba(255,255,255,0.12)"}},
+        "axisTick": {"show": False},
+        "splitLine": {"show": False},
+    }
+
+
+def _value_axes() -> list[dict]:
+    """Y axes: power in watts (left) and heart rate in bpm (right).
+
+    Returns:
+        list[dict]: The ECharts axes.
+    """
+    return [
+        {
+            "type": "value",
+            "name": "W",
+            "min": 0,
+            "nameTextStyle": AXIS_LABEL,
+            "axisLabel": AXIS_LABEL,
+            "splitLine": {"lineStyle": {"color": "rgba(255,255,255,0.06)"}},
+        },
+        {
+            "type": "value",
+            "name": "bpm",
+            "min": 60,
+            "max": 200,
+            "nameTextStyle": AXIS_LABEL,
+            "axisLabel": AXIS_LABEL,
+            "splitLine": {"show": False},
+        },
+    ]
+
+
+def _make_compact(opts: dict) -> None:
+    """Turn the options into a compact preview: power axis only, no gridlines.
+
+    Args:
+        opts (dict): Chart options, changed in place.
+    """
+    opts["yAxis"] = opts["yAxis"][:1]
+    opts["yAxis"][0].update(name="", splitNumber=2, splitLine={"show": False})
+    opts["grid"].update(top=8, right=12)
 
 
 FREE_RIDE_WINDOW_S = 1200  # a free ride shows the last 20 minutes

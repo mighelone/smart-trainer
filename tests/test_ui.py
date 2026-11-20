@@ -373,3 +373,92 @@ async def test_live_ride_reads_the_latest_snapshot(tmp_path, settings):
     before = live.snapshot()
     await e.tick(now_wall=1_700_000_000, now_mono=1.0)  # publishes a new snapshot
     assert live.snapshot() is e.snapshot and live.snapshot() is not before
+
+
+async def test_mini_shows_the_workout_step_and_changes_intensity(user: User, engine):
+    from smart_trainer.core.workout import Step, Workout
+
+    engine.ride.start(Workout("Mini", [Step(600, 0.6), Step(300, 1.0)]))
+    await user.open("/mini")
+    await user.should_see("1/2 · 100%", retries=20)  # interval tile
+    await user.should_see("of 15:00")  # step line: elapsed of the workout duration
+    user.find(marker="mini-plus").click()
+    assert engine.ride.runner and engine.ride.runner.intensity == pytest.approx(1.05)
+    await user.should_see("1/2 · 105%", retries=20)
+
+
+async def test_mini_hides_intensity_in_a_free_ride(user: User, engine):
+    await user.open("/mini")
+    user.find(marker="mini-start").click()
+    await user.should_see("free ride", retries=20)
+    await user.should_not_see(marker="mini-plus")
+
+
+async def test_ride_tiles_show_source_command_and_heart_rate(user: User, engine):
+    from smart_trainer.core.workout import Step, Workout
+
+    engine.settings.update(max_hr=200)
+    engine.ride.select(Workout("Tiles", [Step(600, 1.0)]))
+    await user.open("/")
+    user.find("Start").click()
+    await user.should_see("from pedals", retries=30)  # power tile
+    await user.should_see("trainer command 200 W", retries=30)  # target tile
+    await user.should_see("of max", retries=30)  # heart-rate tile
+
+
+def _unfinished_session(directory) -> None:
+    """Leave a session still marked active, as after a crash."""
+    from smart_trainer.core.recorder import Recorder
+    from smart_trainer.core.state import Snapshot
+
+    rec = Recorder.create(directory, "Crashed", 200, None, now=1_700_000_000)
+    rec.record(Snapshot(power=200, cadence=90), 0, None, False, "erg", now=1_700_000_000)
+    rec.close()
+
+
+async def test_recovery_dialog_resumes_an_unfinished_session(user: User, engine):
+    _unfinished_session(engine.store.directory)
+    await user.open("/")
+    await user.should_see("Unfinished session found", retries=20)
+    user.find("Resume").click()
+    await user.should_see("Session resumed: start pedalling", retries=20)
+    assert engine.ride.state == RideState.RIDING
+
+
+async def test_recovery_dialog_discards_an_unfinished_session(user: User, engine):
+    _unfinished_session(engine.store.directory)
+    await user.open("/")
+    await user.should_see("Unfinished session found", retries=20)
+    user.find("Discard").click()
+    await user.should_see("Session moved to sessions/discarded", retries=20)
+    assert not engine.ride.recoverable_sessions()
+    assert list((engine.store.directory / "discarded").iterdir())
+
+
+def _charts(user: User) -> list[ui.echart]:
+    assert user.client is not None
+    return [el for el in user.client.elements.values() if isinstance(el, ui.echart)]
+
+
+async def test_workout_chart_draws_the_target_profile(user: User, engine):
+    from smart_trainer.core.workout import Step, Workout
+
+    engine.ride.select(Workout("Profile", [Step(300, 0.5), Step(120, 1.0)]))
+    await user.open("/")
+    await user.should_see("Profile", retries=20)
+    [chart] = _charts(user)
+    opts = chart.options
+    assert opts["xAxis"]["max"] == 420
+    assert [s["name"] for s in opts["series"]] == ["Target", "Power", "HR"]
+    assert opts["series"][0]["data"][0] == [0, 100]  # 50 % of a 200 W FTP
+    assert len(opts["yAxis"]) == 2
+
+
+async def test_workout_preview_chart_is_compact(user: User, engine):
+    await user.open("/workouts")
+    await user.should_see("Workouts", retries=20)
+    previews = _charts(user)
+    assert previews
+    for chart in previews:
+        assert [s["name"] for s in chart.options["series"]] == ["Target"]
+        assert len(chart.options["yAxis"]) == 1

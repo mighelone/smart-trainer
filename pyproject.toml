@@ -89,7 +89,7 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-fail_under = 77  # never lower it; raise it as coverage grows, towards 80
+fail_under = 78  # never lower it; raise it as coverage grows, towards 80
 
 [tool.ruff]
 line-length = 100
