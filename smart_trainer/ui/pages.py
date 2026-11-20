@@ -312,6 +312,12 @@ def update_main_tiles(e: Engine, t_power: Tile, t_target: Tile, t_hr: Tile, t_ca
 
 # ===================================================================== RIDE
 MANUAL_UNIT = {"resistance": "%", "slope": "% grade", "erg": " W"}
+# Slider range per manual mode: resistance in %, slope in % grade, ERG in watts
+MANUAL_SLIDER = {
+    Mode.RESISTANCE: "min=0 max=100 step=1",
+    Mode.SLOPE: "min=-10 max=20 step=0.5",
+    Mode.ERG: "min=50 max=600 step=5",
+}
 
 
 class RidePage:
@@ -408,18 +414,26 @@ class RidePage:
         with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-6 w-full"):
             with ui.row().classes("items-center gap-4 grow no-wrap") as self.manual_box:
                 ui.label("Manual").classes("field-label")
-                self.mode = ui.toggle(
-                    {"resistance": "Resistance", "slope": "Slope", "erg": "Fixed ERG"},
-                    value=e.controller.mode.value if e.ride.runner is None else "resistance",
-                    on_change=lambda ev: self.set_manual_mode(ev.value),
-                ).classes("shrink-0")
-                self.slider = ui.slider(
-                    min=0,
-                    max=100,
-                    step=1,
-                    value=e.controller.resistance_pct,
-                    on_change=lambda ev: self.set_manual_value(ev.value),
-                ).classes("grow min-w-[120px]")
+                self.mode = (
+                    ui.toggle(
+                        {"resistance": "Resistance", "slope": "Slope", "erg": "Fixed ERG"},
+                        value=e.controller.mode.value if e.ride.runner is None else "resistance",
+                        on_change=lambda ev: self.set_manual_mode(ev.value),
+                    )
+                    .classes("shrink-0")
+                    .mark("manual-mode")
+                )
+                self.slider = (
+                    ui.slider(
+                        min=0,
+                        max=100,
+                        step=1,
+                        value=e.controller.resistance_pct,
+                        on_change=lambda ev: self.set_manual_value(ev.value),
+                    )
+                    .classes("grow min-w-[120px]")
+                    .mark("manual-slider")
+                )
                 self.slider_label = ui.label("").classes("control-value w-24")
             with ui.row().classes("items-center gap-3 shrink-0"):
                 ui.label("Power source").classes("field-label")
@@ -436,17 +450,10 @@ class RidePage:
         Args:
             m (str): Mode value (``"resistance"``, ``"slope"`` or ``"erg"``).
         """
-        c = self.e.controller
-        c.set_mode(Mode(m))
-        if m == "resistance":
-            self.slider.props("min=0 max=100 step=1")
-            self.slider.value = c.resistance_pct
-        elif m == "slope":
-            self.slider.props("min=-10 max=20 step=0.5")
-            self.slider.value = c.slope_pct
-        else:
-            self.slider.props("min=50 max=600 step=5")
-            self.slider.value = c.erg_target
+        controller, mode = self.e.controller, Mode(m)
+        controller.set_target(mode, controller.target_for(mode))
+        self.slider.props(MANUAL_SLIDER[mode])
+        self.slider.value = controller.target_for(mode)
 
     def set_manual_value(self, v: float) -> None:
         """Apply the slider value to the current manual mode.
@@ -454,13 +461,8 @@ class RidePage:
         Args:
             v (float): Slider value (percent, grade or watts depending on mode).
         """
-        c = self.e.controller
-        if c.mode == Mode.RESISTANCE:
-            c.resistance_pct = v
-        elif c.mode == Mode.SLOPE:
-            c.slope_pct = v
-        else:
-            c.erg_target = v
+        controller = self.e.controller
+        controller.set_target(controller.mode, v)
 
     async def do_finish(self, dialog: ui.dialog, upload: bool) -> None:
         """Finish the ride and notify the result.
@@ -591,10 +593,7 @@ class RidePage:
         """
         self.manual_box.set_visibility(manual)
         c = self.e.controller
-        val = {"resistance": c.resistance_pct, "slope": c.slope_pct, "erg": c.erg_target}[
-            c.mode.value
-        ]
-        self.slider_label.set_text(f"{val:g}{MANUAL_UNIT[c.mode.value]}")
+        self.slider_label.set_text(f"{c.target_for(c.mode):g}{MANUAL_UNIT[c.mode.value]}")
         if manual and self.mode.value != c.mode.value:
             self.mode.value = c.mode.value
 
