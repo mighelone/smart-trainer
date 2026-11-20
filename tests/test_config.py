@@ -1,16 +1,10 @@
 """Settings changes: validated, applied in place and saved (never in demo mode)."""
 
+import keyring
 import pytest
 
-from smart_trainer.config import Settings
+from smart_trainer.config import Settings, get_secret, sessions_dir, set_secret
 from smart_trainer.sync.intervals import IntervalsConnection
-
-
-@pytest.fixture
-def settings(tmp_path, monkeypatch) -> Settings:
-    """Settings saved to a temporary config file."""
-    monkeypatch.setattr(Settings, "path", classmethod(lambda cls: tmp_path / "config.json"))
-    return Settings(ftp=200)
 
 
 def test_update_applies_and_saves(settings):
@@ -67,3 +61,11 @@ async def test_intervals_client_can_use_a_typed_athlete_id(settings):
     conn = IntervalsConnection(settings)
     async with conn.client("key", athlete_id="i7") as typed, conn.client("key") as stored:
         assert typed.athlete_id == "i7" and stored.athlete_id == "0"
+
+
+def test_tests_never_touch_the_real_app_folder_or_keychain(tmp_path):
+    assert Settings.path().is_relative_to(tmp_path)
+    assert sessions_dir().is_relative_to(tmp_path)
+    set_secret("strava", "refresh_token", "t0k3n")
+    assert get_secret("strava", "refresh_token") == "t0k3n"
+    assert type(keyring.get_keyring()).__name__ == "MemoryKeyring"

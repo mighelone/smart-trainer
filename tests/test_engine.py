@@ -111,10 +111,8 @@ async def test_workout_complete_announced_once(tmp_path):
 
 
 @pytest.fixture
-def ride(tmp_path):
+def ride(tmp_path, settings):
     """The ride of an engine without devices (nothing is sent to a trainer)."""
-    settings = Settings(ftp=200, auto_upload=False)
-    settings.readonly = True
     return Engine.from_settings(settings, sessions=tmp_path, run_loop=False).ride
 
 
@@ -236,17 +234,15 @@ async def test_spiral_guard_releases_and_resumes_erg(tmp_path):
 @pytest.mark.parametrize("on", [True, False])
 def test_set_spiral_guard_saves_and_applies(tmp_path, on):
     settings = Settings(auto_upload=False, erg_spiral_guard=not on)
-    settings.readonly = True
     e = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
     e.set_spiral_guard(on)
     assert settings.erg_spiral_guard is on
     assert isinstance(e.controller.guard, SpiralGuard) is on
 
 
-def test_spiral_guard_follows_the_setting(tmp_path):
-    on = Engine.from_settings(Settings(auto_upload=False), sessions=tmp_path, run_loop=False)
-    assert isinstance(on.controller.guard, SpiralGuard)
-    off = Engine.from_settings(
-        Settings(auto_upload=False, erg_spiral_guard=False), sessions=tmp_path, run_loop=False
-    )
-    assert off.controller.guard is None and not off.controller.erg_released
+@pytest.mark.parametrize("on", [True, False])
+def test_spiral_guard_follows_the_setting(tmp_path, on):
+    settings = Settings(auto_upload=False, erg_spiral_guard=on)
+    e = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
+    assert isinstance(e.controller.guard, SpiralGuard) is on
+    assert not e.controller.erg_released

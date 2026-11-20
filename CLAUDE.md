@@ -146,8 +146,9 @@ NiceGUI:
   `monkeypatch`/mocks.
 - Use `@pytest.mark.parametrize` to test several scenarios of the same functionality.
 - Use `@pytest.fixture` to share code and objects between tests.
-- Tests never touch the network, the real keychain or the user's settings and session folders
-  (use `tmp_path`).
+- Tests never touch the network, the real keychain or the user's settings and session folders.
+  `tests/conftest.py` gives every test its own app folder and an in-memory keyring; use its
+  `settings` fixture and `tmp_path`.
 
 ## Workflow
 
