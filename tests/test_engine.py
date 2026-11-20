@@ -110,6 +110,39 @@ async def test_workout_complete_announced_once(tmp_path):
         assert sum("Workout complete" in m for m in e.messages) == 1
 
 
+@pytest.fixture
+def ride(tmp_path):
+    """The ride of an engine without devices (nothing is sent to a trainer)."""
+    settings = Settings(ftp=200, auto_upload=False)
+    settings.readonly = True
+    return Engine.from_settings(settings, sessions=tmp_path, run_loop=False).ride
+
+
+async def test_selected_workout_is_kept_until_the_ride_finishes(ride):
+    workout = Workout("Next", [Step(60, 1.0)])
+    ride.select(workout)
+    ride.start(ride.next_workout)
+    assert ride.runner and ride.runner.workout is workout
+    assert ride.next_workout is workout
+    await ride.finish()
+    assert ride.next_workout is None
+
+
+async def test_selecting_during_a_ride_leaves_it_alone(ride):
+    riding, nxt = Workout("Now", [Step(60, 1.0)]), Workout("Later", [Step(60, 0.5)])
+    ride.start(riding)
+    ride.select(nxt)
+    assert ride.runner and ride.runner.workout is riding
+    assert ride.next_workout is nxt
+
+
+def test_selecting_none_means_a_free_ride(ride):
+    ride.select(Workout("W", [Step(60, 1.0)]))
+    ride.select(None)
+    ride.start(ride.next_workout)
+    assert ride.runner is None and ride.state == RideState.RIDING
+
+
 async def test_finish_resets_ride_when_finalize_fails(tmp_path, monkeypatch):
     async with _engine(tmp_path) as (e, trainer, world):
         e.ride.start(Workout("T", [Step(60, 1.0)]))

@@ -59,13 +59,11 @@ class AppState:
     Attributes:
         engine (Engine): The application engine.
         settings (Settings): User settings (shared with the engine's components).
-        selected (Workout | None): Workout selected for the next ride.
         fake (bool): Whether the app runs with simulated devices.
     """
 
     engine: Engine
     settings: Settings
-    selected: Workout | None = None
     fake: bool = False
     start_mini: bool = False
     full_geometry: tuple[tuple[int, int], tuple[int, int]] | None = None
@@ -232,12 +230,14 @@ def exit_mini() -> None:
 
 def start_ride() -> None:
     """Start a ride with the selected workout (or a free ride)."""
+    ride = S.engine.ride
+    workout = ride.next_workout
     try:
-        S.engine.ride.start(S.selected)
+        ride.start(workout)
     except RuntimeError as exc:
         ui.notify(str(exc), type="warning")
         return
-    ui.notify(f"Started: {S.selected.name if S.selected else 'free ride'}")
+    ui.notify(f"Started: {workout.name if workout else 'free ride'}")
 
 
 def ride_status(e: Engine) -> list[str]:
@@ -476,7 +476,6 @@ class RidePage:
         seen = len(e.messages)
         fit = await e.ride.finish(upload=upload)
         n.dismiss()
-        S.selected = None
         ui.notify(f"Saved {fit.name}" if fit else "Nothing recorded", type="positive")
         for m in list(e.messages)[seen:]:
             ui.notify(m)
@@ -500,7 +499,7 @@ class RidePage:
         wo = (
             e.ride.runner.workout
             if e.ride.runner
-            else (S.selected if e.ride.state == RideState.IDLE else None)
+            else (e.ride.next_workout if e.ride.state == RideState.IDLE else None)
         )
         if self.chart_workout is wo:
             return
@@ -561,7 +560,7 @@ class RidePage:
         e = self.e
         self.t_time.set(fmt_time(e.ride.seconds if riding else 0), "free ride" if riding else "")
         self.t_step.set("--")
-        sel = None if riding else S.selected
+        sel = None if riding else e.ride.next_workout
         self.step_label.set_text(sel.name if sel else "")
         self.next_label.set_text(
             f"{fmt_time(sel.duration_s)} · {len(sel.steps)} steps" if sel else ""
@@ -735,7 +734,7 @@ def mini_page() -> None:
             step_bar.set_value(min(1.0, into / st.duration_s) if st.duration_s else 0)
         else:
             t_step.set("--", "free ride" if riding else "")
-            sel = None if riding else S.selected
+            sel = None if riding else e.ride.next_workout
             text = (
                 f"Free ride · {fmt_time(e.ride.seconds)}"
                 if riding
@@ -761,7 +760,7 @@ def choose_workout(wo: Workout | None) -> None:
     Args:
         wo (Workout | None): The workout, or ``None`` for a free ride.
     """
-    S.selected = wo
+    S.engine.ride.select(wo)
     ui.notify(f"Selected {wo.name}" if wo else "Free ride selected")
     ui.navigate.to("/")
 
@@ -816,10 +815,10 @@ class WorkoutsPage:
         """
         self.e = e
         with ui.column().classes("page"):
-            if S.selected:
+            if selected := e.ride.next_workout:
                 with ui.row().classes("items-center gap-2"):
                     ui.icon("check_circle", color="positive")
-                    ui.label(f"Selected: {S.selected.name}").classes("list-title")
+                    ui.label(f"Selected: {selected.name}").classes("list-title")
             self._build_toolbar()
             self.status = ui.label("").classes("hint")
             self.listing = ui.column().classes("w-full gap-3")

@@ -78,6 +78,8 @@ class Ride:
             (e.g. a calibration is running), or ``None``.
         state (RideState): Current ride state.
         runner (WorkoutRunner | None): Workout runner, if riding a workout.
+        next_workout (Workout | None): Workout selected for the next ride (``None``: free
+            ride); shared by every client and cleared when a ride finishes.
         recorder (Recorder | None): Session recorder while riding.
         manual_pause (bool): Whether the rider paused manually.
         auto_paused (bool): Whether the ride is auto-paused (not pedalling).
@@ -98,6 +100,7 @@ class Ride:
     blocker: Callable[[], str | None] = field(default=_no_blocker, repr=False)
     state: RideState = field(default=RideState.IDLE, init=False)
     runner: WorkoutRunner | None = field(default=None, init=False)
+    next_workout: Workout | None = field(default=None, init=False)
     recorder: Recorder | None = field(default=None, init=False)
     manual_pause: bool = field(default=False, init=False)
     auto_paused: bool = field(default=False, init=False)
@@ -122,6 +125,14 @@ class Ride:
         return self.state != RideState.IDLE
 
     # ---------------------------------------------------------------- lifecycle
+    def select(self, workout: Workout | None) -> None:
+        """Choose the workout for the next ride; a ride in progress is not affected.
+
+        Args:
+            workout (Workout | None): The workout, or ``None`` for a free ride.
+        """
+        self.next_workout = workout
+
     def start(self, workout: Workout | None) -> None:
         """Start recording a new ride.
 
@@ -204,6 +215,7 @@ class Ride:
         Returns:
             Path | None: The FIT file path, or ``None`` if nothing was recorded.
         """
+        self.next_workout = None  # the selection was for this ride
         if not self.recorder:
             return None
         self.state = RideState.FINISHING
