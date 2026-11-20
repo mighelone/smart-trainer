@@ -10,6 +10,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-20
+
 ### Added
 - **Interval cues:** 5 seconds before each workout step change, the app beeps twice and shows
   what comes next (e.g. "In 5 s · Sprint · 400 W for 00:30"), in the full app and in the mini
@@ -121,6 +123,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 - Mac app (Apple Silicon) as a DMG, built and attached to GitHub Releases by the release workflow.
 - Installation guide ([INSTALL.md](INSTALL.md)).
 
-[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.4.0...HEAD
 [0.1.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.1.0
 [0.2.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.2.0
+[0.3.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.3.0
+[0.4.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.4.0
