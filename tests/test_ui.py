@@ -8,7 +8,6 @@ from nicegui import app, ui
 from nicegui.testing import User
 
 from smart_trainer.ble import fake
-from smart_trainer.config import Settings
 from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
@@ -53,10 +52,8 @@ def pages(user: User):
 
 
 @pytest.fixture
-async def context(pages, tmp_path):
+async def context(pages, tmp_path, settings):
     """App context with simulated devices and no connections; its pages are registered."""
-    settings = Settings(ftp=200, auto_upload=False)
-    settings.readonly = True
     e = Engine.from_settings(settings, sessions=tmp_path)
     e.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
     e.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
@@ -382,9 +379,7 @@ async def test_strava_callback_rejects_an_unknown_request(user: User, context, p
     assert "Strava connection failed" in bytes(response.body).decode()
 
 
-async def test_live_ride_reads_the_latest_snapshot(tmp_path):
-    settings = Settings(auto_upload=False)
-    settings.readonly = True
+async def test_live_ride_reads_the_latest_snapshot(tmp_path, settings):
     e = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
     live = LiveRide.of(e)
     before = live.snapshot()

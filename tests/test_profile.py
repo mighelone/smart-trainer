@@ -107,12 +107,6 @@ def _make_engine(tmp_path, handler=None, settings: Settings | None = None) -> En
 
 
 @pytest.fixture
-def settings(tmp_path, monkeypatch):
-    monkeypatch.setattr(Settings, "path", classmethod(lambda cls: tmp_path / "config.json"))
-    return Settings(ftp=200, auto_upload=False)
-
-
-@pytest.fixture
 def engine(tmp_path, settings):
     return _make_engine(tmp_path, _handler, settings)
 
