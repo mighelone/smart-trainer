@@ -23,14 +23,14 @@ RIDING = Snapshot(power=200, cadence=90, hr=140)
 
 @pytest.fixture
 def ride(tmp_path):
-    e = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
-    yield e.ride
-    e.ride.close()
+    engine = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
+    yield engine.ride
+    engine.ride.close()
 
 
-def _ticks(ride, n, start=0):
-    for i in range(start, start + n):
-        ride.tick(RIDING, T0 + i)
+def _ticks(ride, count, start=0):
+    for second in range(start, start + count):
+        ride.tick(RIDING, T0 + second)
 
 
 class FakeChart:
@@ -69,8 +69,8 @@ def _live(chart: FakeChart, history: History, free_ride: bool) -> LiveChart:
 
 
 def _add(history: History, xs, power=200.0, hr=140):
-    for x in xs:
-        history.add(HistoryPoint(x, power, hr, 90.0, None))
+    for elapsed in xs:
+        history.add(HistoryPoint(elapsed, power, hr, 90.0, None))
 
 
 # ----------------------------------------------------------------- Ride history
@@ -83,10 +83,10 @@ def test_history_x_follows_the_workout_clock(ride):
 
 
 def test_resume_restores_history_on_the_recorded_clock(tmp_path):
-    e = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
-    e.ride.start(Workout("T", [Step(600, 1.0)]))
-    _ticks(e.ride, 4)
-    e.ride.close()
+    engine = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
+    engine.ride.start(Workout("T", [Step(600, 1.0)]))
+    _ticks(engine.ride, 4)
+    engine.ride.close()
     e2 = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
     [info] = e2.ride.recoverable_sessions()
     e2.ride.resume(info)
@@ -97,15 +97,15 @@ def test_resume_restores_history_on_the_recorded_clock(tmp_path):
 
 # ------------------------------------------------------------------------ LiveChart
 def test_live_chart_draws_once_then_appends():
-    h = History()
-    _add(h, [1, 2, 3])
+    history = History()
+    _add(history, [1, 2, 3])
     chart = FakeChart()
-    live = _live(chart, h, False)
+    live = _live(chart, history, False)
     live.sync()
     assert chart.updates == 1 and not chart.scripts  # the whole history, once
     assert chart.options["series"][1]["data"] == [[1, 200], [2, 200], [3, 200]]
 
-    _add(h, [4, 5])
+    _add(history, [4, 5])
     live.sync()
     assert chart.updates == 1  # no full update any more
     assert chart.sent()["power"] == [[4, 200], [5, 200]]  # only the new points
@@ -118,26 +118,26 @@ def test_live_chart_draws_once_then_appends():
 
 
 def test_live_chart_redraws_when_the_history_restarts():
-    h = History()
-    _add(h, [1, 2, 3])
+    history = History()
+    _add(history, [1, 2, 3])
     chart = FakeChart()
-    live = _live(chart, h, True)
+    live = _live(chart, history, True)
     live.sync()
-    h.restart()  # a new or resumed ride
-    _add(h, [1])
+    history.restart()  # a new or resumed ride
+    _add(history, [1])
     live.sync()
     assert chart.updates == 2 and chart.options["series"][1]["data"] == [[1, 200]]
 
 
 def test_live_chart_free_ride_window_and_trim():
-    h = History(maxlen=4)
+    history = History(maxlen=4)
     chart = FakeChart()
-    live = _live(chart, h, True)
+    live = _live(chart, history, True)
     live.sync()
     assert chart.options["xAxis"] == {"min": 0, "max": 600}
-    _add(h, [1501, 1502, 1503])  # well into the ride
+    _add(history, [1501, 1502, 1503])  # well into the ride
     live.sync()
-    _add(h, [1504, 1505, 1506])
+    _add(history, [1504, 1505, 1506])
     live.sync()
     assert chart.sent()["axis"] == {"min": 306, "max": 1506}  # the last 20 minutes
     assert chart.sent()["max"] == 4
@@ -163,11 +163,11 @@ console.log(JSON.stringify({options: el.options, calls}));
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js to run the script")
 def test_append_script_in_javascript():
-    h = History(maxlen=3)
+    history = History(maxlen=3)
     chart = FakeChart()
-    live = _live(chart, h, True)
+    live = _live(chart, history, True)
     live.sync()
-    _add(h, [1, 2])
+    _add(history, [1, 2])
     live.sync()
     script = chart.scripts[-1]
     out = subprocess.run(

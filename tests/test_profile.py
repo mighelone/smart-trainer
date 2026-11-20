@@ -24,29 +24,34 @@ ATHLETE = {"id": "i1", "name": "Rider", "icu_weight": 71.5, "sportSettings": [RU
 
 
 def test_parse_profile_picks_ride_and_indoor_ftp():
-    p = parse_profile(ATHLETE)
-    assert p.ftp == 265  # indoor FTP preferred
-    assert p.weight_kg == 71.5
-    assert p.power_zones == RIDE["power_zones"]
-    assert p.power_zone_names[0] == "Recovery"
-    assert p.hr_zones == RIDE["hr_zones"]
-    assert (p.lthr, p.max_hr) == (165, 190)  # from Ride, not Run
+    profile = parse_profile(ATHLETE)
+    assert profile.ftp == 265  # indoor FTP preferred
+    assert profile.weight_kg == 71.5
+    assert profile.power_zones == RIDE["power_zones"]
+    assert profile.power_zone_names[0] == "Recovery"
+    assert profile.hr_zones == RIDE["hr_zones"]
+    assert (profile.lthr, profile.max_hr) == (165, 190)  # from Ride, not Run
 
 
 def test_parse_profile_falls_back_to_ftp_and_handles_missing():
-    p = parse_profile({"sportSettings": [{**RIDE, "indoor_ftp": None}]})
-    assert p.ftp == 280
-    assert p.weight_kg is None
+    profile = parse_profile({"sportSettings": [{**RIDE, "indoor_ftp": None}]})
+    assert profile.ftp == 280
+    assert profile.weight_kg is None
     empty = parse_profile({})
     assert empty == AthleteProfile()
 
 
 def test_apply_only_overwrites_known_values():
-    s = Settings(ftp=200, weight_kg=80.0, lthr=150)
-    changed = AthleteProfile(ftp=265, power_zones=[50, 100, 999]).apply(s)
+    settings = Settings(ftp=200, weight_kg=80.0, lthr=150)
+    changed = AthleteProfile(ftp=265, power_zones=[50, 100, 999]).apply(settings)
     assert changed == ["FTP", "power zones"]
-    assert (s.ftp, s.weight_kg, s.lthr, s.power_zones) == (265, 80.0, 150, [50, 100, 999])
-    assert AthleteProfile(ftp=265).apply(s) == []
+    assert (settings.ftp, settings.weight_kg, settings.lthr, settings.power_zones) == (
+        265,
+        80.0,
+        150,
+        [50, 100, 999],
+    )
+    assert AthleteProfile(ftp=265).apply(settings) == []
 
 
 def test_zone_targets_use_rider_zones():

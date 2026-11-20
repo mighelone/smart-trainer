@@ -41,8 +41,8 @@ class FakeWindow:
     def resize(self, width: int, height: int) -> None:
         self.size = (width, height)
 
-    def move(self, x: int, y: int) -> None:
-        self.position = (x, y)
+    def move(self, left: int, top: int) -> None:
+        self.position = (left, top)
 
 
 @pytest.fixture
@@ -54,14 +54,14 @@ def pages(user: User):
 @pytest.fixture
 async def context(pages, tmp_path, settings):
     """App context with simulated devices and no connections; its pages are registered."""
-    e = Engine.from_settings(settings, sessions=tmp_path)
-    e.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
-    e.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
-    e.devices.add(fake.FakeHeartRate(), [Role.HR])
+    engine = Engine.from_settings(settings, sessions=tmp_path)
+    engine.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
+    engine.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
+    engine.devices.add(fake.FakeHeartRate(), [Role.HR])
     strava = StravaAuthorization(settings, 8080, open_url=lambda url: None)
-    ctx = AppContext(engine=e, settings=settings, strava=strava, fake=True)
+    ctx = AppContext(engine=engine, settings=settings, strava=strava, fake=True)
     pages.register_pages(ctx)
-    async with e:
+    async with engine:
         await asyncio.sleep(0.4)  # let the fake devices connect
         yield ctx
 
@@ -107,15 +107,15 @@ async def test_mini_start_and_pause(user: User, engine):
 
 
 async def test_mini_native_window(user: User, engine, pages, monkeypatch):
-    w = FakeWindow()
-    monkeypatch.setattr(app.native, "main_window", w)  # the app of this simulation
+    window = FakeWindow()
+    monkeypatch.setattr(app.native, "main_window", window)  # the app of this simulation
     await user.open("/")
     user.find(marker="mini").click()
     await user.should_see(marker="mini-expand", retries=20)
-    assert w.on_top and w.size == MINI_SIZE
+    assert window.on_top and window.size == MINI_SIZE
     user.find(marker="mini-expand").click()
     await user.should_see("Elapsed", retries=20)
-    assert not w.on_top and w.size == (1400, 900) and w.position == (50, 60)
+    assert not window.on_top and window.size == (1400, 900) and window.position == (50, 60)
 
 
 async def test_start_in_mini(user: User, context):
@@ -130,9 +130,9 @@ async def test_history_lists_sessions_and_loads_more(user: User, engine, pages, 
     from smart_trainer.core.state import Snapshot
 
     monkeypatch.setattr(HistoryPage, "PAGE_SIZE", 2)
-    for i in range(3):
-        now = 1_700_000_000 + i * 3600
-        rec = Recorder.create(engine.store.directory, f"Ride {i}", 200, None, now=now)
+    for index in range(3):
+        now = 1_700_000_000 + index * 3600
+        rec = Recorder.create(engine.store.directory, f"Ride {index}", 200, None, now=now)
         rec.record(Snapshot(power=200, cadence=90), 0, None, False, "erg", now=now)
         rec.set_status("finished")
         rec.close()
@@ -368,11 +368,11 @@ async def test_start_rides_the_selected_workout(user: User, engine):
 
 
 async def test_live_ride_reads_the_latest_snapshot(tmp_path, settings):
-    e = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
-    live = LiveRide.of(e)
+    engine = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
+    live = LiveRide.of(engine)
     before = live.snapshot()
-    await e.tick(now_wall=1_700_000_000, now_mono=1.0)  # publishes a new snapshot
-    assert live.snapshot() is e.snapshot and live.snapshot() is not before
+    await engine.tick(now_wall=1_700_000_000, now_mono=1.0)  # publishes a new snapshot
+    assert live.snapshot() is engine.snapshot and live.snapshot() is not before
 
 
 async def test_mini_shows_the_workout_step_and_changes_intensity(user: User, engine):

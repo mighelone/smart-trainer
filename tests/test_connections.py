@@ -32,8 +32,10 @@ def test_settings_migrates_flat_intervals_fields():
 
 def _session(tmp_path) -> Recorder:
     rec = Recorder.create(tmp_path, "Ride", 250, None, now=1_700_000_000)
-    for i in range(5):
-        rec.record(Snapshot(power=200, cadence=90), i, None, False, "erg", now=1_700_000_000 + i)
+    for index in range(5):
+        rec.record(
+            Snapshot(power=200, cadence=90), index, None, False, "erg", now=1_700_000_000 + index
+        )
     return rec
 
 

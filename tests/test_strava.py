@@ -70,17 +70,17 @@ def ride(tmp_path):
 
 
 def test_authorize_url():
-    q = parse_qs(urlparse(authorize_url("42", "http://127.0.0.1:8080/cb", "xyz")).query)
-    assert q["client_id"] == ["42"] and q["state"] == ["xyz"]
-    assert q["redirect_uri"] == ["http://127.0.0.1:8080/cb"]
-    assert "activity:write" in q["scope"][0].split(",")
+    query = parse_qs(urlparse(authorize_url("42", "http://127.0.0.1:8080/cb", "xyz")).query)
+    assert query["client_id"] == ["42"] and query["state"] == ["xyz"]
+    assert query["redirect_uri"] == ["http://127.0.0.1:8080/cb"]
+    assert "activity:write" in query["scope"][0].split(",")
 
 
 async def test_upload_polls_until_processed_and_rotates_token(ride):
     api = Api([{"activity_id": None}, {"activity_id": None}, {"activity_id": 12345}])
-    async with _client(api) as c:
-        assert await c.upload_activity(ride) == "12345"
-        assert c.refresh_token == "rt-2"  # Strava rotated it
+    async with _client(api) as client:
+        assert await client.upload_activity(ride) == "12345"
+        assert client.refresh_token == "rt-2"  # Strava rotated it
     body = api.uploads[0]
     assert b'name="data_type"\r\n\r\nfit' in body
     assert b'name="trainer"\r\n\r\n1' in body
@@ -90,26 +90,26 @@ async def test_upload_polls_until_processed_and_rotates_token(ride):
 
 async def test_duplicate_counts_as_uploaded(ride):
     error = "session.fit duplicate of <a href='/activities/555' target='_blank'>activity</a>"
-    async with _client(Api([{"error": error}])) as c:
-        assert await c.upload_activity(ride) == "555"
+    async with _client(Api([{"error": error}])) as client:
+        assert await client.upload_activity(ride) == "555"
 
 
 async def test_processing_error(ride):
-    async with _client(Api([{"error": "Corrupt file"}])) as c:
+    async with _client(Api([{"error": "Corrupt file"}])) as client:
         with pytest.raises(StravaError, match="Corrupt file"):
-            await c.upload_activity(ride)
+            await client.upload_activity(ride)
 
 
 async def test_bad_refresh_token(ride):
-    async with _client(Api([]), refresh="revoked") as c:
+    async with _client(Api([]), refresh="revoked") as client:
         with pytest.raises(StravaError, match="reconnect"):
-            await c.upload_activity(ride)
+            await client.upload_activity(ride)
 
 
 async def test_not_connected(ride):
-    async with _client(Api([]), refresh=None) as c:
+    async with _client(Api([]), refresh=None) as client:
         with pytest.raises(StravaError, match="Not connected"):
-            await c.upload_activity(ride)
+            await client.upload_activity(ride)
 
 
 async def test_expired_authorization(ride):
@@ -118,9 +118,9 @@ async def test_expired_authorization(ride):
             return _token(request)
         return httpx.Response(401)
 
-    async with _client(api) as c:
+    async with _client(api) as client:
         with pytest.raises(StravaError, match="expired"):
-            await c.upload_activity(ride)
+            await client.upload_activity(ride)
 
 
 # ------------------------------------------------------------- connection

@@ -20,10 +20,10 @@ def _store(tmp_path) -> SessionStore:
     return SessionStore(tmp_path, sync, deque())
 
 
-def _session(store: SessionStore, name: str, now: float, n: int = 3) -> Recorder:
+def _session(store: SessionStore, name: str, now: float, samples: int = 3) -> Recorder:
     rec = Recorder.create(store.directory, name, 200, None, now=now)
-    for i in range(n):
-        rec.record(Snapshot(power=200, cadence=90), i, None, False, "erg", now=now + i)
+    for index in range(samples):
+        rec.record(Snapshot(power=200, cadence=90), index, None, False, "erg", now=now + index)
     return rec
 
 
@@ -59,18 +59,18 @@ def test_listing_reads_only_changed_sessions(tmp_path, monkeypatch):
 
 def test_listing_drops_discarded_sessions(tmp_path):
     store = _store(tmp_path)
-    for i, name in enumerate(("A", "B")):
-        _session(store, name, 1_700_000_000 + i * 100).close()
-    [b, a] = store.list_sessions()
-    store.discard(b)
+    for index, name in enumerate(("A", "B")):
+        _session(store, name, 1_700_000_000 + index * 100).close()
+    [session_b, session_a] = store.list_sessions()
+    store.discard(session_b)
     assert [s.name for s in store.list_sessions()] == ["A"]
-    assert b.path not in store._cache
+    assert session_b.path not in store._cache
 
 
 def test_listing_limit_reads_only_the_most_recent(tmp_path, monkeypatch):
     store = _store(tmp_path)
-    for i in range(5):
-        _session(store, f"R{i}", 1_700_000_000 + i * 100).close()
+    for index in range(5):
+        _session(store, f"R{index}", 1_700_000_000 + index * 100).close()
     reads = _count_reads(monkeypatch)
     assert [s.name for s in store.list_sessions(limit=2)] == ["R4", "R3"]
     assert len(reads) == 2
@@ -93,7 +93,7 @@ def test_unfinished_uses_the_listing(tmp_path):
 
 async def test_finalize_exports_fit_in_a_worker_thread(tmp_path, monkeypatch):
     store = _store(tmp_path)
-    rec = _session(store, "Ride", 1_700_000_000, n=10)
+    rec = _session(store, "Ride", 1_700_000_000, samples=10)
     threads = []
     real = sessions_mod._export_fit
 

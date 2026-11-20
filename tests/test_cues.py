@@ -21,16 +21,16 @@ THREE_STEPS = Workout("T", [Step(20, 0.5), Step(20, 0.8, text="Tempo"), Step(20,
 
 @pytest.fixture
 def ride(tmp_path):
-    e = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
-    yield e.ride
-    e.ride.close()
+    engine = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
+    yield engine.ride
+    engine.ride.close()
 
 
 def _cue_times(ride, ticks: int) -> list[tuple[float, int]]:
     """Ride ``ticks`` seconds; return (workout elapsed, ending step) at each new cue."""
     out, seq = [], ride.cue.seq if ride.cue else 0
-    for i in range(ticks):
-        ride.tick(RIDING, T0 + i)
+    for tick in range(ticks):
+        ride.tick(RIDING, T0 + tick)
         if ride.cue and ride.cue.seq != seq:
             seq = ride.cue.seq
             out.append((ride.runner.elapsed, ride.cue.step_index))
@@ -74,8 +74,8 @@ def test_a_short_step_is_cued_when_it_starts(ride):
 
 def test_free_ride_has_no_cues(ride):
     ride.start(None)
-    for i in range(30):
-        ride.tick(RIDING, T0 + i)
+    for tick in range(30):
+        ride.tick(RIDING, T0 + tick)
     assert ride.cue is None
 
 

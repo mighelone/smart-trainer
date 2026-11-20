@@ -22,24 +22,24 @@ def test_parse_intervals_doc():
 
 def test_runner_ramp_skip_and_intensity():
     wo = parse_intervals_doc(DOC, ftp=200)
-    r = WorkoutRunner(wo, ftp=200)
-    assert r.target_w() == 90  # 45 % of 200
-    r.advance(240)
-    assert r.target_w() == pytest.approx(120)  # halfway up the ramp: 60 %
-    r.skip()
-    assert r.step_index() == 1 and r.target_w() == 140
-    r.intensity = 1.1
-    assert r.target_w() == pytest.approx(154)
-    r.paused = True
-    r.advance(30)
-    assert r.elapsed == 480
+    runner = WorkoutRunner(wo, ftp=200)
+    assert runner.target_w() == 90  # 45 % of 200
+    runner.advance(240)
+    assert runner.target_w() == pytest.approx(120)  # halfway up the ramp: 60 %
+    runner.skip()
+    assert runner.step_index() == 1 and runner.target_w() == 140
+    runner.intensity = 1.1
+    assert runner.target_w() == pytest.approx(154)
+    runner.paused = True
+    runner.advance(30)
+    assert runner.elapsed == 480
 
 
 def test_runner_resume_from_elapsed():
     wo = parse_intervals_doc(DOC, ftp=200)
-    r = WorkoutRunner(wo, ftp=200, elapsed_s=480 + 400)
-    i, step, into, remaining = r.current()
-    assert i == 2 and into == 40 and remaining == 320
+    runner = WorkoutRunner(wo, ftp=200, elapsed_s=480 + 400)
+    index, step, into, remaining = runner.current()
+    assert index == 2 and into == 40 and remaining == 320
 
 
 def test_parse_zwo():

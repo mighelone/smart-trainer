@@ -54,8 +54,8 @@ class UnconfiguredConnection(FakeConnection):
 def _store(tmp_path, conns, readonly=False, **settings):
     st = Settings(ftp=200, **settings)
     st.readonly = readonly
-    for c in conns:
-        c.settings = st
+    for conn in conns:
+        conn.settings = st
     messages: deque[str] = deque()
     sync = SyncService(st, messages, lambda: list(conns), ride_active=lambda: False)
     return SessionStore(tmp_path, sync, messages), messages
@@ -64,9 +64,14 @@ def _store(tmp_path, conns, readonly=False, **settings):
 def _recorded(store: SessionStore, name="Test ride", now=1_700_000_000) -> Recorder:
     # explicit start time: session files are named after the second they start in
     rec = Recorder.create(store.directory, name, 200, None, now=now)
-    for i in range(5):
+    for index in range(5):
         rec.record(
-            Snapshot(power=200, cadence=90, hr=140), i, None, False, "resistance", now=now + i
+            Snapshot(power=200, cadence=90, hr=140),
+            index,
+            None,
+            False,
+            "resistance",
+            now=now + index,
         )
     return rec
 
@@ -159,7 +164,7 @@ async def test_demo_mode_never_uploads(tmp_path):
 
 
 async def test_engine_without_connections_has_no_sync(tmp_path):
-    e = Engine.from_settings(Settings(), sessions=tmp_path, run_loop=False)
-    assert e.sync.connections() == []
-    assert await e.sync.sync_profile() is None
-    assert "No profile connection" in e.messages[-1]
+    engine = Engine.from_settings(Settings(), sessions=tmp_path, run_loop=False)
+    assert engine.sync.connections() == []
+    assert await engine.sync.sync_profile() is None
+    assert "No profile connection" in engine.messages[-1]

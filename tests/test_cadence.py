@@ -16,9 +16,9 @@ TWO_STEPS = Workout("C", [Step(60, 0.6, cadence=90), Step(60, 0.8, cadence=100),
 
 @pytest.fixture
 def ride(tmp_path):
-    e = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
-    yield e.ride
-    e.ride.close()
+    engine = Engine.from_settings(Settings(ftp=200, auto_upload=False), sessions=tmp_path)
+    yield engine.ride
+    engine.ride.close()
 
 
 def _ride(ride, seconds: int, cadence: float | None) -> list:
@@ -50,8 +50,8 @@ def test_no_target_in_a_free_ride(ride):
 def test_low_alert_after_five_seconds_off_target(ride):
     ride.start(TWO_STEPS)
     alerts = _ride(ride, 7, 75)  # 15 rpm under 90
-    n = int(CADENCE_WARN_AFTER_S)
-    assert alerts == [None] * (n - 1) + ["low"] * (7 - n + 1)
+    seconds = int(CADENCE_WARN_AFTER_S)
+    assert alerts == [None] * (seconds - 1) + ["low"] * (7 - seconds + 1)
 
 
 def test_high_alert(ride):
