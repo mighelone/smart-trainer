@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from smart_trainer.ble import fake
 from smart_trainer.config import Settings
-from smart_trainer.core.control import Mode
+from smart_trainer.core.control import SPIRAL_RELEASE_SLOPE, Mode, SpiralGuard
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.recorder import find_unfinished
 from smart_trainer.core.ride import MAX_TICK_DT_S, RideState
@@ -180,3 +180,28 @@ async def test_resume_restores_active_time_without_crash_gap(tmp_path):
         [info] = e2.ride.recoverable_sessions()
         e2.ride.resume(info)
         assert e2.ride.seconds == live == 1 + 1 + 1 + MAX_TICK_DT_S + 1
+
+
+async def test_spiral_guard_releases_and_resumes_erg(tmp_path):
+    async with _engine(tmp_path) as (e, trainer, world):
+        e.ride.start(Workout("T", [Step(600, 1.0)]))
+        await _ride(e, 5, 1_700_000_000)
+        assert trainer.mode == "erg"
+        world.cadence_base = 35  # grinding to a halt
+        await _ride(e, 6, 1_700_000_005)
+        assert e.controller.erg_released
+        assert (trainer.mode, trainer.value) == ("slope", SPIRAL_RELEASE_SLOPE)
+        assert e.controller.mode == Mode.ERG and e.ride.current_target() == 200
+        world.cadence_base = 85  # spun back up
+        await _ride(e, 4, 1_700_000_011)
+        assert not e.controller.erg_released
+        assert trainer.mode == "erg" and trainer.value > 195
+
+
+def test_spiral_guard_follows_the_setting(tmp_path):
+    on = Engine.from_settings(Settings(auto_upload=False), sessions=tmp_path, run_loop=False)
+    assert isinstance(on.controller.guard, SpiralGuard)
+    off = Engine.from_settings(
+        Settings(auto_upload=False, erg_spiral_guard=False), sessions=tmp_path, run_loop=False
+    )
+    assert off.controller.guard is None and not off.controller.erg_released

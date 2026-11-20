@@ -87,8 +87,70 @@ class PowerMatcher:
         return max(target - c.max_offset_w, min(target + c.max_offset_w, cmd))
 
 
+# ERG spiral guard: in ERG mode a falling cadence makes the trainer brake harder (it holds
+# the power), which slows the rider further until they stall. Below SPIRAL_RELEASE_RPM for
+# SPIRAL_RELEASE_S the trainer is let go (flat road) until the rider spins back up.
+SPIRAL_RELEASE_RPM = 50
+SPIRAL_RELEASE_S = 3.0
+SPIRAL_RESUME_RPM = 70
+SPIRAL_RESUME_S = 2.0
+SPIRAL_RELEASE_SLOPE = 0.0  # what the trainer gets while released: a flat road
+
+
+class SpiralGuard:
+    """Decides when to let go of the ERG target because the cadence collapsed.
+
+    It releases after ``SPIRAL_RELEASE_S`` below ``SPIRAL_RELEASE_RPM`` and resumes after
+    ``SPIRAL_RESUME_S`` at ``SPIRAL_RESUME_RPM`` or more; the gap between the two keeps it
+    from flipping back and forth. A missing cadence reading changes nothing.
+
+    Attributes:
+        released (bool): Whether the ERG target is currently let go.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the guard, not released."""
+        self.released = False
+        self._since: float | None = None  # when the cadence crossed the threshold that matters
+
+    def reset(self) -> None:
+        """Forget the cadence history and resume ERG."""
+        self.released = False
+        self._since = None
+
+    def update(self, cadence: float | None, now: float) -> bool:
+        """Feed the current cadence.
+
+        Args:
+            cadence (float | None): Cadence in rpm, ``None`` if unknown.
+            now (float): Current monotonic time.
+
+        Returns:
+            bool: Whether the ERG target is let go.
+        """
+        if cadence is None:
+            return self.released
+        crossing = cadence >= SPIRAL_RESUME_RPM if self.released else cadence < SPIRAL_RELEASE_RPM
+        if not crossing:
+            self._since = None
+            return self.released
+        if self._since is None:
+            self._since = now
+        wait = SPIRAL_RESUME_S if self.released else SPIRAL_RELEASE_S
+        if now - self._since >= wait:
+            self.released = not self.released
+            self._since = None
+            log.info(
+                "ERG %s (cadence %.0f rpm)", "released" if self.released else "resumed", cadence
+            )
+        return self.released
+
+
 class TrainerController:
     """Holds the current mode/target and pushes changes to the trainer.
+
+    In ERG mode an injected :class:`SpiralGuard` may replace the ERG command with a flat
+    road while the cadence has collapsed; the mode and the target stay as they are.
 
     Attributes:
         RESEND_S (float): Seconds after which an unchanged command is resent.
@@ -98,17 +160,21 @@ class TrainerController:
         slope_pct (float): Simulated grade in percent.
         use_pedals (bool): Whether to match pedal power in ERG mode.
         matcher (PowerMatcher): Pedal power matcher.
+        guard (SpiralGuard | None): Lets go of the ERG target when the cadence collapses;
+            ``None`` when the spiral guard is off.
         last_command (tuple[Mode, float] | None): Last command sent to the trainer.
         trainer (ControllableTrainer | None): Trainer being controlled.
     """
 
     RESEND_S = 10.0
 
-    def __init__(self, cfg: PowerMatch) -> None:
+    def __init__(self, cfg: PowerMatch, guard: SpiralGuard | None = None) -> None:
         """Initialize the controller.
 
         Args:
             cfg (PowerMatch): Pedal power matching parameters.
+            guard (SpiralGuard | None): Spiral guard to apply in ERG mode; ``None``
+                turns it off.
         """
         self.mode = Mode.RESISTANCE
         self.erg_target = 150.0
@@ -116,6 +182,7 @@ class TrainerController:
         self.slope_pct = 0.0
         self.use_pedals = True
         self.matcher = PowerMatcher(cfg)
+        self.guard = guard
         self.last_command: tuple[Mode, float] | None = None
         self._last_sent_at = 0.0
         self.trainer: ControllableTrainer | None = None
@@ -140,6 +207,17 @@ class TrainerController:
         if mode != self.mode:
             self.mode = mode
             self.matcher.reset()
+            if self.guard:
+                self.guard.reset()
+
+    @property
+    def erg_released(self) -> bool:
+        """Whether the ERG target is let go because the cadence collapsed.
+
+        Returns:
+            bool: ``True`` while the spiral guard holds the trainer on a flat road.
+        """
+        return self.guard is not None and self.guard.released
 
     def force_resend(self) -> None:
         """Force the next :meth:`apply` call to resend the command."""
@@ -156,6 +234,8 @@ class TrainerController:
             tuple[Mode, float]: The mode and its value (watts, percent or grade).
         """
         if self.mode == Mode.ERG:
+            if self._released(snapshot, now):
+                return Mode.SLOPE, SPIRAL_RELEASE_SLOPE
             target = self.erg_target
             if self.use_pedals and snapshot.pedal_power is not None:
                 return Mode.ERG, self.matcher.command(target, snapshot, now)
@@ -163,6 +243,26 @@ class TrainerController:
         if self.mode == Mode.RESISTANCE:
             return Mode.RESISTANCE, self.resistance_pct
         return Mode.SLOPE, self.slope_pct
+
+    def _released(self, snapshot: Snapshot, now: float | None) -> bool:
+        """Run the spiral guard; restart power matching cleanly when ERG resumes.
+
+        Args:
+            snapshot (Snapshot): Current effective metrics.
+            now (float | None): Current monotonic time; defaults to ``time.monotonic()``.
+
+        Returns:
+            bool: Whether the ERG target is let go.
+        """
+        guard = self.guard
+        if guard is None:
+            return False
+        was = guard.released
+        released = guard.update(snapshot.cadence, now if now is not None else time.monotonic())
+        if was and not released:
+            # power was under target while grinding: drop the integral it built up
+            self.matcher.reset()
+        return released
 
     async def apply(
         self, snapshot: Snapshot, connected: bool, now: float | None = None

@@ -21,6 +21,11 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   more than 10 rpm off the target for 5 seconds, the cadence tile turns amber with a LOW or HIGH
   badge and a "speed up"/"ease off" hint, and the status line (also on the mini overlay) shows
   "Cadence low: 78 / 100 rpm".
+- **ERG spiral guard:** in ERG mode, when your cadence stays below 50 rpm for 3 seconds, the
+  trainer is let go to a flat road instead of braking harder until you stall. The status line shows
+  "ERG released: spin up to 70 rpm"; after 2 seconds at 70 rpm or more the workout target comes
+  straight back. The workout clock, the recorded target and the FIT file are not affected. Turn it
+  off in **Settings → Ride**.
 
 ### Changed
 - The "Next" line of a workout shows the target with the current intensity applied.

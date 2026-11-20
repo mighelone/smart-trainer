@@ -1,5 +1,14 @@
+from typing import cast
+
+from smart_trainer.ble.device import ControllableTrainer
 from smart_trainer.config import PowerMatch
-from smart_trainer.core.control import PowerMatcher
+from smart_trainer.core.control import (
+    SPIRAL_RELEASE_SLOPE,
+    Mode,
+    PowerMatcher,
+    SpiralGuard,
+    TrainerController,
+)
 from smart_trainer.core.state import Snapshot
 
 
@@ -47,3 +56,130 @@ def test_no_learning_when_not_pedaling():
     for t in range(60):
         m.command(200, Snapshot(cadence=0, pedal_power=0, pedal_avg=0, trainer_avg=0), now=float(t))
     assert m.ratio == 1.0 and m.integral == 0.0
+
+
+# ------------------------------------------------------------------ ERG spiral guard
+class _Trainer:
+    """Records the commands the controller sends."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, float]] = []
+
+    async def set_erg(self, watts: float) -> None:
+        self.sent.append(("erg", watts))
+
+    async def set_resistance(self, pct: float) -> None:
+        self.sent.append(("resistance", pct))
+
+    async def set_slope(self, grade: float) -> None:
+        self.sent.append(("slope", grade))
+
+
+def _controller(
+    spiral_guard: bool = True, target: float = 250
+) -> tuple[TrainerController, _Trainer]:
+    c = TrainerController(PowerMatch(), SpiralGuard() if spiral_guard else None)
+    trainer = _Trainer()
+    c.trainer = cast(ControllableTrainer, trainer)
+    c.use_pedals = False  # trainer power: the ERG command is the target itself
+    c.erg_target = target
+    c.set_mode(Mode.ERG)
+    return c, trainer
+
+
+async def _ride(c: TrainerController, cadences: list[float | None], t0: float = 0.0) -> float:
+    """One apply per second at the given cadences; returns the next time."""
+    t = t0
+    for cad in cadences:
+        await c.apply(Snapshot(cadence=cad, power=100), connected=True, now=t)
+        t += 1.0
+    return t
+
+
+def _last(trainer: _Trainer) -> tuple[str, float]:
+    return trainer.sent[-1]
+
+
+async def test_short_cadence_dip_keeps_erg():
+    c, trainer = _controller()
+    await _ride(c, [90, 40, 40, 40, 90, 90])  # under 50 rpm for 2 s only (t=1..3)
+    assert not c.erg_released
+    assert {cmd for cmd, _ in trainer.sent} == {"erg"}
+
+
+async def test_collapsed_cadence_releases_erg_to_a_flat_road():
+    c, trainer = _controller()
+    t = await _ride(c, [90, 45, 45, 45])  # under 50 since t=1: 2 s at t=3
+    assert not c.erg_released
+    await _ride(c, [45], t)  # 3 s at t=4
+    assert c.erg_released
+    assert _last(trainer) == ("slope", SPIRAL_RELEASE_SLOPE)
+    assert c.mode == Mode.ERG and c.erg_target == 250  # the ride's target is untouched
+
+
+async def test_erg_resumes_only_after_spinning_up():
+    c, trainer = _controller()
+    t = await _ride(c, [30, 30, 30, 30])
+    assert c.erg_released
+    t = await _ride(c, [60, 60, 60, 60, 60], t)  # between the thresholds: stays released
+    assert c.erg_released
+    t = await _ride(c, [75, 75, 50, 75, 75], t)  # interrupted: the 2 s start over
+    assert c.erg_released
+    await _ride(c, [75], t)
+    assert not c.erg_released
+    assert _last(trainer) == ("erg", 250)  # straight back to the full target
+
+
+async def test_missing_cadence_never_releases():
+    c, trainer = _controller()
+    await _ride(c, [None] * 10)
+    assert not c.erg_released
+    assert _last(trainer) == ("erg", 250)
+
+
+async def test_missing_cadence_keeps_a_release():
+    c, _ = _controller()
+    t = await _ride(c, [30, 30, 30, 30])
+    await _ride(c, [None] * 5, t)
+    assert c.erg_released
+
+
+async def test_guard_off_holds_the_target():
+    c, trainer = _controller(spiral_guard=False)
+    await _ride(c, [20] * 10)
+    assert not c.erg_released
+    assert {cmd for cmd, _ in trainer.sent} == {"erg"}
+
+
+async def test_turning_the_guard_off_resumes_erg():
+    c, trainer = _controller()
+    t = await _ride(c, [30, 30, 30, 30])
+    assert c.erg_released
+    c.guard = None
+    await _ride(c, [30], t)
+    assert not c.erg_released and _last(trainer) == ("erg", 250)
+
+
+async def test_leaving_erg_clears_the_release():
+    c, trainer = _controller()
+    t = await _ride(c, [30, 30, 30, 30])
+    assert c.erg_released
+    c.set_mode(Mode.RESISTANCE)
+    t = await _ride(c, [30], t)
+    assert not c.erg_released and _last(trainer)[0] == "resistance"
+    c.set_mode(Mode.ERG)  # back in ERG: a fresh 3 s are needed before releasing again
+    await _ride(c, [30, 30], t)
+    assert not c.erg_released and _last(trainer) == ("erg", 250)
+
+
+async def test_power_matching_restarts_clean_after_a_release():
+    c, _ = _controller()
+    c.use_pedals = True
+    c.matcher.integral = 40.0  # built up while grinding under target
+    c.matcher.ratio = 1.05
+    t = await _ride(c, [30, 30, 30, 30])
+    assert c.erg_released
+    await _ride(c, [80, 80, 80], t)
+    assert not c.erg_released
+    assert c.matcher.integral == 0.0
+    assert c.matcher.ratio == 1.05  # the learned calibration is kept

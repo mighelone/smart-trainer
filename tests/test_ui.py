@@ -287,3 +287,29 @@ async def test_cadence_alert_on_ride_and_mini(user: User, engine, pages):
     await user.should_see("Cadence high:", retries=20)
     await user.open("/mini")
     await user.should_see("Cadence high:", retries=20)  # replaces the step line
+
+
+async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeypatch):
+    from smart_trainer.core.workout import Step, Workout
+
+    pages.S.selected = Workout("ERG", [Step(600, 1.0)])
+    await user.open("/")
+    user.find("Start").click()
+    await asyncio.sleep(0.2)
+    monkeypatch.setattr(type(engine.controller), "erg_released", property(lambda self: True))
+    monkeypatch.setattr(engine.ride, "auto_paused", False)
+    assert "ERG released: spin up to 70 rpm" in pages.ride_status(engine)
+    await user.should_see("ERG released: spin up to 70 rpm", retries=20)
+
+
+async def test_settings_switch_turns_the_spiral_guard_off(user: User, engine, pages):
+    from smart_trainer.core.control import SpiralGuard
+
+    pages.S.settings.erg_spiral_guard = True
+    engine.controller.guard = SpiralGuard()
+    await user.open("/settings")
+    user.find(marker="erg-spiral-guard").click()
+    assert pages.S.settings.model_dump()["erg_spiral_guard"] is False
+    assert engine.controller.guard is None
+    user.find(marker="erg-spiral-guard").click()  # and back on
+    assert isinstance(engine.controller.guard, SpiralGuard)

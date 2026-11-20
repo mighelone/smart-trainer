@@ -19,7 +19,12 @@ from smart_trainer.ble.device import (
     Device,
 )
 from smart_trainer.config import Settings
-from smart_trainer.core.control import Mode
+from smart_trainer.core.control import (
+    SPIRAL_RELEASE_RPM,
+    SPIRAL_RESUME_RPM,
+    Mode,
+    SpiralGuard,
+)
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.library import builtin_workouts
 from smart_trainer.core.recorder import SessionInfo, UploadState
@@ -237,7 +242,7 @@ def start_ride() -> None:
 
 
 def ride_status(e: Engine) -> list[str]:
-    """Status messages for the ride (pause, auto-pause, device warnings).
+    """Status messages for the ride (pause, auto-pause, ERG release, device warnings).
 
     Args:
         e (Engine): The application engine.
@@ -250,6 +255,8 @@ def ride_status(e: Engine) -> list[str]:
         status.append("PAUSED")
     elif e.ride.state == RideState.RIDING and e.ride.auto_paused:
         status.append("Auto-paused: start pedalling")
+    elif e.ride.state == RideState.RIDING and e.controller.erg_released:
+        status.append(f"ERG released: spin up to {SPIRAL_RESUME_RPM} rpm")
     elif e.ride.cadence_alert and e.ride.cadence_target is not None:
         cad = fmt(e.snapshot.cadence)
         status.append(f"Cadence {e.ride.cadence_alert}: {cad} / {e.ride.cadence_target} rpm")
@@ -1459,7 +1466,7 @@ class SettingsPage:
         ui.button("Save", icon="save", on_click=self.save).props("color=positive").classes("mt-2")
 
     def _build_ride(self) -> None:
-        """Build the ride section: interval cues."""
+        """Build the ride section: interval cues and the ERG spiral guard."""
         ui.label("Ride").classes("section-title mt-2")
         with ui.row().classes("items-center gap-2"):
             self.cues = ui.switch(
@@ -1471,6 +1478,14 @@ class SettingsPage:
                 "Test sound", icon="volume_up", on_click=lambda: CuePlayer.beep(ui.context.client)
             ).props("flat color=secondary")
         CuePlayer.install()
+        ui.switch(
+            f"Release ERG when cadence drops below {SPIRAL_RELEASE_RPM} rpm",
+            value=self.st.erg_spiral_guard,
+            on_change=lambda ev: self.toggle_spiral_guard(bool(ev.value)),
+        ).mark("erg-spiral-guard").tooltip(
+            "Avoids grinding to a halt: the trainer goes to a flat road until you spin "
+            f"back up to {SPIRAL_RESUME_RPM} rpm, then the target comes back"
+        )
 
     def _build_connections(self) -> None:
         """Build the connections section: automatic upload and one card per connection."""
@@ -1558,6 +1573,16 @@ class SettingsPage:
         """Persist the interval cues switch."""
         self.st.interval_cues = bool(self.cues.value)
         self.st.save()
+
+    def toggle_spiral_guard(self, on: bool) -> None:
+        """Persist the ERG spiral guard switch and apply it to the ride in progress.
+
+        Args:
+            on (bool): Whether the guard is on.
+        """
+        self.st.erg_spiral_guard = on
+        self.st.save()
+        self.e.controller.guard = SpiralGuard() if on else None
 
     def toggle_auto(self) -> None:
         """Persist the global automatic upload switch."""
