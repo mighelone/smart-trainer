@@ -4,10 +4,12 @@ import asyncio
 import sys
 
 import pytest
+from nicegui import ui
 from nicegui.testing import User
 
 from smart_trainer.ble import fake
 from smart_trainer.config import Settings
+from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import ConnState, Role
@@ -313,3 +315,14 @@ async def test_settings_switch_turns_the_spiral_guard_off(user: User, engine, pa
     assert engine.controller.guard is None
     user.find(marker="erg-spiral-guard").click()  # and back on
     assert isinstance(engine.controller.guard, SpiralGuard)
+
+
+async def test_manual_control_sets_the_trainer_target(user: User, engine):
+    await user.open("/")
+    mode = user.find(marker="manual-mode").elements.pop()
+    slider = user.find(marker="manual-slider").elements.pop()
+    assert isinstance(mode, ui.toggle) and isinstance(slider, ui.slider)
+    mode.value = "slope"
+    slider.value = 4.5
+    assert engine.controller.mode == Mode.SLOPE
+    assert engine.controller.target_for(Mode.SLOPE) == 4.5

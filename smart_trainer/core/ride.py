@@ -361,8 +361,7 @@ class Ride:
         if self.runner is None:
             return
         if target is not None and self.erg_enabled:
-            self.controller.erg_target = target
-            self.controller.set_mode(Mode.ERG)
+            self.controller.set_target(Mode.ERG, target)
         elif self.controller.mode == Mode.ERG:
             self.controller.set_mode(Mode.RESISTANCE)
 

@@ -1,5 +1,7 @@
 from typing import cast
 
+import pytest
+
 from smart_trainer.ble.device import ControllableTrainer
 from smart_trainer.config import PowerMatch
 from smart_trainer.core.control import (
@@ -58,6 +60,31 @@ def test_no_learning_when_not_pedaling():
     assert m.ratio == 1.0 and m.integral == 0.0
 
 
+# ------------------------------------------------------------------ targets
+@pytest.mark.parametrize(
+    ("mode", "value", "command"),
+    [
+        (Mode.ERG, 220.0, ("erg", 220)),
+        (Mode.RESISTANCE, 40.0, ("resistance", 40.0)),
+        (Mode.SLOPE, 3.5, ("slope", 3.5)),
+    ],
+)
+async def test_set_target_switches_mode_and_sends_its_value(mode, value, command):
+    c, trainer = _controller(spiral_guard=False)
+    c.set_target(mode, value)
+    await c.apply(Snapshot(cadence=90, power=100), connected=True, now=0.0)
+    assert c.mode == mode and c.target_for(mode) == value
+    assert _last(trainer) == command
+
+
+def test_each_mode_keeps_its_own_target():
+    c = TrainerController(PowerMatch())
+    c.set_target(Mode.SLOPE, 2.0)
+    c.set_target(Mode.ERG, 300.0)
+    c.set_target(Mode.SLOPE, c.target_for(Mode.SLOPE))  # back to slope: its target is kept
+    assert c.target_for(Mode.SLOPE) == 2.0 and c.target_for(Mode.ERG) == 300.0
+
+
 # ------------------------------------------------------------------ ERG spiral guard
 class _Trainer:
     """Records the commands the controller sends."""
@@ -82,8 +109,7 @@ def _controller(
     trainer = _Trainer()
     c.trainer = cast(ControllableTrainer, trainer)
     c.use_pedals = False  # trainer power: the ERG command is the target itself
-    c.erg_target = target
-    c.set_mode(Mode.ERG)
+    c.set_target(Mode.ERG, target)
     return c, trainer
 
 

@@ -210,6 +210,36 @@ class TrainerController:
             if self.guard:
                 self.guard.reset()
 
+    def set_target(self, mode: Mode, value: float) -> None:
+        """Switch to a mode and set its target.
+
+        Args:
+            mode (Mode): The control mode.
+            value (float): Its target: watts (ERG), percent (resistance) or grade (slope).
+        """
+        self.set_mode(mode)
+        if mode == Mode.ERG:
+            self.erg_target = value
+        elif mode == Mode.RESISTANCE:
+            self.resistance_pct = value
+        else:
+            self.slope_pct = value
+
+    def target_for(self, mode: Mode) -> float:
+        """The target kept for a mode, whether or not it is the current one.
+
+        Args:
+            mode (Mode): The control mode.
+
+        Returns:
+            float: Watts (ERG), percent (resistance) or grade (slope).
+        """
+        if mode == Mode.ERG:
+            return self.erg_target
+        if mode == Mode.RESISTANCE:
+            return self.resistance_pct
+        return self.slope_pct
+
     @property
     def erg_released(self) -> bool:
         """Whether the ERG target is let go because the cadence collapsed.
