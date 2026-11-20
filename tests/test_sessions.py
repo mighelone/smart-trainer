@@ -109,3 +109,32 @@ async def test_finalize_exports_fit_in_a_worker_thread(tmp_path, monkeypatch):
     with fitdecode.FitReader(fit) as fr:
         records = [f for f in fr if isinstance(f, fitdecode.FitDataMessage) and f.name == "record"]
     assert len(records) == 10
+
+
+def test_unreadable_sessions_are_skipped_with_a_warning(tmp_path, caplog):
+    from smart_trainer.core.recorder import list_sessions
+
+    store = _store(tmp_path)
+    _session(store, "Good", 1_700_000_000).close()
+    (tmp_path / "session-99999999-999999.sqlite").write_bytes(b"not a database")
+    assert [s.name for s in store.list_sessions()] == ["Good"]
+    assert [s.name for s in list_sessions(tmp_path)] == ["Good"]
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 2
+    assert all("session-99999999-999999.sqlite" in r.getMessage() for r in warnings)
+
+
+def test_upload_outcome_keeps_the_given_time(tmp_path):
+    import sqlite3
+
+    store = _store(tmp_path)
+    rec = _session(store, "Up", 1_700_000_000)
+    rec.set_upload("strava", remote_id="42", now=1_700_000_500)
+    path = rec.path
+    rec.close()
+    con = sqlite3.connect(path)
+    try:
+        row = con.execute("SELECT remote_id, updated_at FROM uploads").fetchone()
+    finally:
+        con.close()
+    assert row == ("42", 1_700_000_500)

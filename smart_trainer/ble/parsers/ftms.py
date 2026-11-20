@@ -1,5 +1,6 @@
-"""FTMS (Fitness Machine Service) parsers and commands: indoor bike data, control point,
-spin-down and machine status.
+"""FTMS (Fitness Machine Service) parsers and commands.
+
+Indoor bike data, control point, spin-down and machine status.
 
 Pure functions, free of side effects, so they can be unit tested with captured payloads.
 """

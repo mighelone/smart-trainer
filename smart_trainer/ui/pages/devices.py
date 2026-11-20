@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,8 @@ from smart_trainer.core.calibration import CalibrationService
 from smart_trainer.core.devices import DeviceHub
 from smart_trainer.core.state import Role
 from smart_trainer.ui.pages.frame import DOT_COLOR, ROLE_ICON
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from smart_trainer.ble.scanner import Discovered
@@ -324,6 +327,7 @@ class DevicesPage:
         try:
             results = await scan(6.0)
         except Exception as exc:
+            log.warning("Bluetooth scan failed: %s", exc)
             ui.notify(
                 f"Bluetooth scan failed: {exc}. Check that Bluetooth is on and allowed "
                 "for your terminal in System Settings → Privacy & Security → Bluetooth.",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from nicegui import ui
 
 from smart_trainer.core.recorder import SessionInfo
@@ -71,8 +73,8 @@ class RecoveryDialog:
         fit = await self.store.finish_crashed(self.info)
         ui.notify(f"Saved {fit.name if fit else 'session'}")
 
-    def discard(self) -> None:
+    async def discard(self) -> None:
         """Move the unfinished session to the discarded folder."""
         self.dialog.close()
-        self.store.discard(self.info)
+        await asyncio.to_thread(self.store.discard, self.info)
         ui.notify("Session moved to sessions/discarded")

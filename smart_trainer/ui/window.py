@@ -17,11 +17,47 @@ class NativeWindow(Protocol):
     these methods from type checkers.
     """
 
-    async def get_size(self) -> tuple[int, int]: ...
-    async def get_position(self) -> tuple[int, int]: ...
-    def set_always_on_top(self, on_top: bool) -> None: ...
-    def resize(self, width: int, height: int) -> None: ...
-    def move(self, x: int, y: int) -> None: ...
+    async def get_size(self) -> tuple[int, int]:
+        """Window size.
+
+        Returns:
+            tuple[int, int]: Width and height in pixels.
+        """
+        ...
+
+    async def get_position(self) -> tuple[int, int]:
+        """Window position on the screen.
+
+        Returns:
+            tuple[int, int]: Left and top in pixels.
+        """
+        ...
+
+    def set_always_on_top(self, on_top: bool) -> None:
+        """Keep the window above the others, or not.
+
+        Args:
+            on_top (bool): Whether the window stays on top.
+        """
+        ...
+
+    def resize(self, width: int, height: int) -> None:
+        """Resize the window.
+
+        Args:
+            width (int): Width in pixels.
+            height (int): Height in pixels.
+        """
+        ...
+
+    def move(self, x: int, y: int) -> None:
+        """Move the window.
+
+        Args:
+            x (int): Left edge in pixels.
+            y (int): Top edge in pixels.
+        """
+        ...
 
 
 def native_window() -> NativeWindow | None:
