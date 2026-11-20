@@ -7,7 +7,7 @@ from bleak import BleakClient
 from smart_trainer.ble import uuids
 from smart_trainer.ble.bleak_device import BleakDevice
 from smart_trainer.ble.device import DriverId, register
-from smart_trainer.ble.parsers import parse_heart_rate
+from smart_trainer.ble.parsers.heart_rate import parse_heart_rate
 from smart_trainer.core.state import Reading, Role
 
 

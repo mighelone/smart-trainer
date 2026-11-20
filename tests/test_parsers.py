@@ -1,28 +1,30 @@
 import struct
 
-from smart_trainer.ble.parsers import (
+from smart_trainer.ble.parsers.control import result_text
+from smart_trainer.ble.parsers.cycling_power import (
     CadenceCalculator,
     CpOp,
+    cmd_start_offset_compensation,
+    format_offset,
+    parse_cp_control_response,
+    parse_cp_feature,
+    parse_cycling_power,
+    parse_offset,
+)
+from smart_trainer.ble.parsers.ftms import (
     FtmsOp,
     FtmsStatus,
     SpinDownStatus,
     cmd_set_simulation,
     cmd_set_target_power,
     cmd_spin_down,
-    cmd_start_offset_compensation,
-    format_offset,
     ftms_spin_down_supported,
     parse_control_response,
-    parse_cp_control_response,
-    parse_cp_feature,
-    parse_cycling_power,
-    parse_heart_rate,
     parse_indoor_bike_data,
     parse_machine_status,
-    parse_offset,
     parse_spin_down_targets,
-    result_text,
 )
+from smart_trainer.ble.parsers.heart_rate import parse_heart_rate
 
 
 def test_heart_rate_uint8_and_rr():
