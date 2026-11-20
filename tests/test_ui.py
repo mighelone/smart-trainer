@@ -4,7 +4,7 @@ import asyncio
 import sys
 
 import pytest
-from nicegui import ui
+from nicegui import app, ui
 from nicegui.testing import User
 
 from smart_trainer.ble import fake
@@ -13,6 +13,8 @@ from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
 from smart_trainer.core.state import ConnState, Role
+from smart_trainer.ui.context import AppContext
+from smart_trainer.ui.window import MINI_SIZE
 
 pytestmark = pytest.mark.nicegui_main_file("tests/ui_main.py")
 
@@ -48,18 +50,25 @@ def pages(user: User):
 
 
 @pytest.fixture
-async def engine(pages, tmp_path):
-    """Engine with simulated devices and no connections, installed in the pages module."""
+async def context(pages, tmp_path):
+    """App context with simulated devices and no connections; its pages are registered."""
     settings = Settings(ftp=200, auto_upload=False)
     settings.readonly = True
     e = Engine.from_settings(settings, sessions=tmp_path)
     e.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
     e.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
     e.devices.add(fake.FakeHeartRate(), [Role.HR])
-    pages.S.engine, pages.S.settings, pages.S.fake = e, settings, True
+    ctx = AppContext(engine=e, settings=settings, fake=True)
+    pages.register_pages(ctx)
     async with e:
         await asyncio.sleep(0.4)  # let the fake devices connect
-        yield e
+        yield ctx
+
+
+@pytest.fixture
+def engine(context):
+    """The engine of the app context."""
+    return context.engine
 
 
 @pytest.mark.parametrize(
@@ -98,21 +107,21 @@ async def test_mini_start_and_pause(user: User, engine):
 
 async def test_mini_native_window(user: User, engine, pages, monkeypatch):
     w = FakeWindow()
-    monkeypatch.setattr(pages.app.native, "main_window", w)  # the app of this simulation
+    monkeypatch.setattr(app.native, "main_window", w)  # the app of this simulation
     await user.open("/")
     user.find(marker="mini").click()
     await user.should_see(marker="mini-expand", retries=20)
-    assert w.on_top and w.size == pages.MINI_SIZE
+    assert w.on_top and w.size == MINI_SIZE
     user.find(marker="mini-expand").click()
     await user.should_see("Elapsed", retries=20)
     assert not w.on_top and w.size == (1400, 900) and w.position == (50, 60)
 
 
-async def test_start_in_mini(user: User, engine, pages):
-    pages.S.start_mini = True
+async def test_start_in_mini(user: User, context):
+    context.window.start_mini = True
     await user.open("/")
     await user.should_see(marker="mini-expand", retries=20)
-    assert not pages.S.start_mini
+    assert not context.window.start_mini
 
 
 async def test_history_lists_sessions_and_loads_more(user: User, engine, pages, monkeypatch):
@@ -209,7 +218,7 @@ async def test_interval_cue_beeps_and_shows_the_next_step(
 ):
     from smart_trainer.core.workout import Step, Workout
 
-    pages.S.settings.interval_cues = enabled
+    engine.settings.interval_cues = enabled
     engine.ride.select(Workout("Cue", [Step(6, 0.75), Step(6, 1.0, text="Push")]))
     await user.open("/")
     scripts = _record_scripts(user, monkeypatch)
@@ -245,10 +254,10 @@ async def test_opening_a_page_does_not_replay_an_old_cue(user: User, engine, pag
 
 
 async def test_settings_switch_turns_cues_off(user: User, engine, pages):
-    pages.S.settings.interval_cues = True
+    engine.settings.interval_cues = True
     await user.open("/settings")
     user.find(marker="interval-cues").click()
-    assert pages.S.settings.model_dump()["interval_cues"] is False
+    assert engine.settings.model_dump()["interval_cues"] is False
 
 
 def _cadence_workout():
@@ -307,11 +316,11 @@ async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeyp
 async def test_settings_switch_turns_the_spiral_guard_off(user: User, engine, pages):
     from smart_trainer.core.control import SpiralGuard
 
-    pages.S.settings.erg_spiral_guard = True
+    engine.settings.erg_spiral_guard = True
     engine.controller.guard = SpiralGuard()
     await user.open("/settings")
     user.find(marker="erg-spiral-guard").click()
-    assert pages.S.settings.model_dump()["erg_spiral_guard"] is False
+    assert engine.settings.model_dump()["erg_spiral_guard"] is False
     assert engine.controller.guard is None
     user.find(marker="erg-spiral-guard").click()  # and back on
     assert isinstance(engine.controller.guard, SpiralGuard)
@@ -329,7 +338,7 @@ async def test_manual_control_sets_the_trainer_target(user: User, engine):
 
 
 async def test_settings_save_updates_profile_and_power_matching(user: User, engine, pages):
-    settings = pages.S.settings
+    settings = engine.settings
     settings.sync_profile = False
     power_match = engine.controller.matcher.cfg
     await user.open("/settings")
@@ -355,3 +364,16 @@ async def test_start_rides_the_selected_workout(user: User, engine):
     user.find("Start").click()
     await user.should_see("Started: Picked")
     assert engine.ride.runner and engine.ride.runner.workout is workout
+
+
+async def test_strava_callback_route_is_registered(user: User, context, pages):
+    paths = {getattr(route, "path", None) for route in app.routes}
+    assert pages.connections.STRAVA_CALLBACK in paths
+
+
+async def test_strava_callback_rejects_an_unknown_request(user: User, context, pages):
+    response = await pages.connections.finish_strava_authorization(
+        context.settings, "never-sent", "code", "", "activity:write"
+    )
+    assert response.status_code == 400
+    assert "Strava connection failed" in bytes(response.body).decode()

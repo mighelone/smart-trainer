@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import multiprocessing
 import sys
 from contextlib import AsyncExitStack
 
@@ -17,22 +18,25 @@ from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
 from smart_trainer.sync import registry
 from smart_trainer.sync.base import Capability
-from smart_trainer.ui import (
-    connections,
-    pages,  # noqa: F401  (registers the pages)
-)
-from smart_trainer.ui.pages import FULL_SIZE, MINI_SIZE, S
+from smart_trainer.ui import connections
+from smart_trainer.ui.context import AppContext
+from smart_trainer.ui.pages import register_pages
+from smart_trainer.ui.window import FULL_SIZE, MINI_SIZE, MiniWindow
 
 log = logging.getLogger("smart_trainer")
 _background: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
 _lifetime = AsyncExitStack()  # enters the engine at startup, exits it at shutdown
 
 
-async def _startup(use_fake: bool) -> None:
-    """Load settings, create the engine and its devices, and start it.
+def _build(use_fake: bool, start_mini: bool) -> AppContext:
+    """Load the settings and build the engine and the pages' context.
 
     Args:
-        use_fake (bool): Use simulated devices and a read-only demo configuration.
+        use_fake (bool): Use a read-only demo configuration and session folder.
+        start_mini (bool): Open the mini overlay on the first visit.
+
+    Returns:
+        AppContext: The app's objects.
     """
     settings = Settings.load()
     sessions = None
@@ -47,7 +51,18 @@ async def _startup(use_fake: bool) -> None:
     engine = Engine.from_settings(
         settings, sessions=sessions, connections=lambda: registry.all_connections(settings)
     )
-    S.engine, S.settings, S.fake = engine, settings, use_fake
+    return AppContext(
+        engine=engine, settings=settings, window=MiniWindow(start_mini), fake=use_fake
+    )
+
+
+async def _startup(ctx: AppContext) -> None:
+    """Add the devices and start the engine (needs the running event loop).
+
+    Args:
+        ctx (AppContext): The app's objects.
+    """
+    engine, settings, use_fake = ctx.engine, ctx.settings, ctx.fake
     if use_fake:
         engine.devices.add(fake.FakeTrainer(), [Role.TRAINER, Role.SPEED])
         engine.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
@@ -94,13 +109,17 @@ def run() -> None:
     args = parser.parse_args()
     if args.mini:
         args.native = True
-        S.start_mini = True
         app.native.window_args["on_top"] = True
     if log_file := setup_logging(to_file=args.native):
         log.info("logging to %s", log_file)
 
-    app.on_startup(lambda: _startup(args.fake))
-    app.on_shutdown(_lifetime.aclose)
+    # The native window runs in a child process that re-runs this function (ui.run returns
+    # there right away): only the server process builds the engine and the pages.
+    if multiprocessing.current_process().name == "MainProcess":
+        ctx = _build(args.fake, start_mini=args.mini)
+        register_pages(ctx)
+        app.on_startup(lambda: _startup(ctx))
+        app.on_shutdown(_lifetime.aclose)
     port = args.port
     if port is None:
         # A native window doesn't need a stable URL, so avoid clashing with other apps;

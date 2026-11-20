@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from fastapi.responses import HTMLResponse
 from nicegui import app, ui
 
-from smart_trainer.config import get_api_key, get_secret, set_secret
+from smart_trainer.config import Settings, get_api_key, get_secret, set_secret
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.sync.intervals import IntervalsConnection
 from smart_trainer.sync.strava import StravaConnection, authorize_url
@@ -251,13 +251,38 @@ def _page(title: str, text: str, status_code: int = 200) -> HTMLResponse:
     )
 
 
-@app.get(STRAVA_CALLBACK)
-async def strava_callback(
-    state: str = "", code: str = "", error: str = "", scope: str = ""
-) -> HTMLResponse:
-    """Finish the Strava OAuth flow: trade the code for tokens and store them.
+def register_strava_callback(settings: Settings) -> None:
+    """Add the route the Strava OAuth redirect comes back to.
 
     Args:
+        settings (Settings): User settings, where the Strava connection is stored.
+    """
+
+    @app.get(STRAVA_CALLBACK)
+    async def strava_callback(
+        state: str = "", code: str = "", error: str = "", scope: str = ""
+    ) -> HTMLResponse:
+        """Finish the Strava OAuth flow.
+
+        Args:
+            state (str): The value sent with the authorization request.
+            code (str): Authorization code.
+            error (str): Set by Strava when the user denied access.
+            scope (str): Scopes the user granted.
+
+        Returns:
+            HTMLResponse: A page telling the user the outcome.
+        """
+        return await finish_strava_authorization(settings, state, code, error, scope)
+
+
+async def finish_strava_authorization(
+    settings: Settings, state: str, code: str, error: str, scope: str
+) -> HTMLResponse:
+    """Trade the OAuth code for tokens and store them.
+
+    Args:
+        settings (Settings): User settings, where the Strava connection is stored.
         state (str): The value sent with the authorization request.
         code (str): Authorization code.
         error (str): Set by Strava when the user denied access.
@@ -266,8 +291,6 @@ async def strava_callback(
     Returns:
         HTMLResponse: A page telling the user the outcome.
     """
-    from smart_trainer.ui.pages import S
-
     if state not in _strava_states:
         return _page("Strava connection failed", "Unknown request: connect again.", 400)
     _strava_states.discard(state)
@@ -279,7 +302,7 @@ async def strava_callback(
             "Allow 'Upload your activities' so rides can be uploaded. Connect again.",
             400,
         )
-    conn = StravaConnection(S.settings)
+    conn = StravaConnection(settings)
     try:
         name = await conn.authorize(code)
     except Exception as exc:

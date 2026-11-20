@@ -1,4 +1,4 @@
-"""NiceGUI pages. The UI only reads Engine state and calls Engine methods."""
+"""NiceGUI pages, built with the app's objects by :func:`register_pages`."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any
 
-from nicegui import app, ui
+from nicegui import ui
 
 from smart_trainer.ble.device import (
     DRIVERS,
@@ -27,11 +27,13 @@ from smart_trainer.core.control import (
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.library import builtin_workouts
 from smart_trainer.core.recorder import SessionInfo, UploadState
-from smart_trainer.core.ride import RideState
+from smart_trainer.core.ride import Ride, RideState
 from smart_trainer.core.state import ConnState, Role
 from smart_trainer.core.workout import Workout, WorkoutRunner, parse_zwo
 from smart_trainer.sync.base import Capability, Connection
+from smart_trainer.ui import connections
 from smart_trainer.ui.connections import connection_card
+from smart_trainer.ui.context import AppContext
 from smart_trainer.ui.theme import apply_theme
 from smart_trainer.ui.widgets import (
     CuePlayer,
@@ -53,27 +55,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class AppState:
-    """Global UI state shared by all pages.
-
-    Attributes:
-        engine (Engine): The application engine.
-        settings (Settings): User settings (shared with the engine's components).
-        fake (bool): Whether the app runs with simulated devices.
-    """
-
-    engine: Engine
-    settings: Settings
-    fake: bool = False
-    start_mini: bool = False
-    full_geometry: tuple[tuple[int, int], tuple[int, int]] | None = None
-
-
-S = AppState()
-
-MINI_SIZE = (1000, 210)  # native window size of the mini overlay (incl. title bar)
-FULL_SIZE = (1280, 860)  # size restored when the app was started in mini mode
-
 DOT_COLOR = {
     ConnState.CONNECTED: "#22c55e",
     ConnState.CONNECTING: "#f59e0b",
@@ -89,10 +70,11 @@ ROLE_ICON = {
 }
 
 
-def frame(title: str) -> None:
+def frame(ctx: AppContext, title: str) -> None:
     """Common header with navigation and device status chips.
 
     Args:
+        ctx (AppContext): The app's objects.
         title (str): Page title shown in the header.
     """
     apply_theme()
@@ -100,7 +82,7 @@ def frame(title: str) -> None:
         with ui.row().classes("items-center gap-3"):
             ui.icon("directions_bike", size="sm").classes("text-primary")
             ui.label("Smart Trainer").classes("brand")
-            if S.fake:
+            if ctx.fake:
                 ui.badge("Demo", color="warning").props("outline").tooltip("Simulated devices")
         with ui.row().classes("gap-1"):
             for label, path in (
@@ -114,10 +96,10 @@ def frame(title: str) -> None:
                 ui.button(label, on_click=lambda p=path: ui.navigate.to(p)).props(
                     f"flat dense padding='6px 14px' color={'white' if active else 'grey-5'}"
                 ).classes("nav-btn" + (" active" if active else ""))
-            ui.button(icon="picture_in_picture_alt", on_click=enter_mini).props(
+            ui.button(icon="picture_in_picture_alt", on_click=ctx.window.enter).props(
                 "flat dense padding='6px 10px' color=grey-5"
             ).classes("nav-btn").mark("mini").tooltip("Mini overlay: stays on top of other windows")
-        chips = DeviceChips(S.engine)
+        chips = DeviceChips(ctx.engine)
     ui.timer(2.0, chips.refresh)
 
 
@@ -174,63 +156,12 @@ class DeviceChips:
             self._tips[role].set_text(tip)
 
 
-# ============================================================ WINDOW MODES
-class NativeWindow(Protocol):
-    """The part of NiceGUI's native ``WindowProxy`` used here.
+def start_ride(ride: Ride) -> None:
+    """Start a ride with the selected workout (or a free ride).
 
-    NiceGUI falls back to an empty ``WindowProxy`` class when pywebview is missing, which hides
-    these methods from type checkers.
+    Args:
+        ride (Ride): The ride.
     """
-
-    async def get_size(self) -> tuple[int, int]: ...
-    async def get_position(self) -> tuple[int, int]: ...
-    def set_always_on_top(self, on_top: bool) -> None: ...
-    def resize(self, width: int, height: int) -> None: ...
-    def move(self, x: int, y: int) -> None: ...
-
-
-def native_window() -> NativeWindow | None:
-    """The native desktop window, or ``None`` when running in a browser.
-
-    Returns:
-        NativeWindow | None: The window proxy.
-    """
-    return cast("NativeWindow | None", app.native.main_window)
-
-
-async def enter_mini() -> None:
-    """Switch to the mini overlay: small, always-on-top window (native) and the /mini page."""
-    w = native_window()
-    if w is not None:
-        S.full_geometry = (await w.get_size(), await w.get_position())
-        w.set_always_on_top(True)
-        w.resize(*MINI_SIZE)
-    ui.navigate.to("/mini")
-
-
-def restore_full_window() -> None:
-    """Restore the normal window: not on top, previous size and position (native only)."""
-    w = native_window()
-    if w is None:
-        return
-    w.set_always_on_top(False)
-    if S.full_geometry:
-        (width, height), (x, y) = S.full_geometry
-        w.resize(width, height)
-        w.move(x, y)
-    else:
-        w.resize(*FULL_SIZE)
-
-
-def exit_mini() -> None:
-    """Leave the mini overlay and go back to the full ride page."""
-    restore_full_window()
-    ui.navigate.to("/")
-
-
-def start_ride() -> None:
-    """Start a ride with the selected workout (or a free ride)."""
-    ride = S.engine.ride
     workout = ride.next_workout
     try:
         ride.start(workout)
@@ -265,18 +196,21 @@ def ride_status(e: Engine) -> list[str]:
     return status
 
 
-def update_main_tiles(e: Engine, t_power: Tile, t_target: Tile, t_hr: Tile, t_cad: Tile) -> None:
+def update_main_tiles(
+    e: Engine, settings: Settings, t_power: Tile, t_target: Tile, t_hr: Tile, t_cad: Tile
+) -> None:
     """Update the power, target, heart-rate and cadence tiles from the engine state.
 
     Args:
         e (Engine): The application engine.
+        settings (Settings): User settings (FTP and zones).
         t_power (Tile): 3 s power tile.
         t_target (Tile): Target power tile.
         t_hr (Tile): Heart-rate tile.
         t_cad (Tile): Cadence tile.
     """
     snap = e.snapshot
-    ftp = S.settings.ftp
+    ftp = settings.ftp
     assignment = e.devices.assignment
     p3 = snap.power_avg
     src = (
@@ -289,7 +223,7 @@ def update_main_tiles(e: Engine, t_power: Tile, t_target: Tile, t_hr: Tile, t_ca
         if snap.pedal_power is not None and snap.trainer_power is not None
         else ""
     )
-    zones = S.settings.power_zones
+    zones = settings.power_zones
     t_power.set(fmt(p3), sub)
     t_power.set_zone(*power_zone(p3, ftp, zones))
     target = e.ride.current_target()
@@ -301,9 +235,9 @@ def update_main_tiles(e: Engine, t_power: Tile, t_target: Tile, t_hr: Tile, t_ca
         else f"{e.controller.mode.value} mode",
     )
     t_target.set_zone(*power_zone(target, ftp, zones))
-    max_hr = S.settings.max_hr
+    max_hr = settings.max_hr
     t_hr.set(fmt(snap.hr), f"{snap.hr / max_hr:.0%} of max" if snap.hr and max_hr else "")
-    t_hr.set_zone(*hr_zone(snap.hr, S.settings.hr_zones))
+    t_hr.set_zone(*hr_zone(snap.hr, settings.hr_zones))
     cad_sub, cad_accent, cad_badge = cadence_display(e.ride.cadence_target, e.ride.cadence_alert)
     t_cad.set(fmt(snap.cadence), cad_sub)
     t_cad.set_zone(cad_accent, cad_badge)
@@ -324,17 +258,20 @@ class RidePage:
 
     Attributes:
         e (Engine): The application engine.
+        settings (Settings): User settings (FTP, zones, cues).
         ftp (int): FTP used to draw the workout chart.
     """
 
-    def __init__(self, e: Engine) -> None:
+    def __init__(self, e: Engine, settings: Settings) -> None:
         """Build the page.
 
         Args:
             e (Engine): The application engine.
+            settings (Settings): User settings.
         """
         self.e = e
-        self.ftp = S.settings.ftp
+        self.settings = settings
+        self.ftp = settings.ftp
         self.chart = None
         self.live: LiveChart | None = None
         self.chart_workout: object = object()
@@ -346,7 +283,7 @@ class RidePage:
             self.holder = ui.card().classes("w-full p-2")
             self._build_controls()
             self._build_manual()
-        self.cues = CuePlayer(e.ride, lambda: S.settings.interval_cues)
+        self.cues = CuePlayer(e.ride, lambda: settings.interval_cues)
 
     # ------------------------------------------------------------- build
     def _build_tiles(self) -> None:
@@ -378,9 +315,9 @@ class RidePage:
         """Build the ride controls: start/pause/skip/lap, intensity, ERG and finish."""
         e = self.e
         with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-3 w-full"):
-            self.btn_start = ui.button("Start", icon="play_arrow", on_click=start_ride).props(
-                "color=positive size=lg padding='8px 28px'"
-            )
+            self.btn_start = ui.button(
+                "Start", icon="play_arrow", on_click=lambda: start_ride(e.ride)
+            ).props("color=positive size=lg padding='8px 28px'")
             self.btn_pause = ui.button(
                 "Pause", icon="pause", on_click=lambda: e.ride.toggle_pause()
             ).props("color=primary size=lg padding='8px 24px'")
@@ -438,7 +375,7 @@ class RidePage:
                 ui.label("Power source").classes("field-label")
                 ui.toggle(
                     {"pedals": "Pedals", "trainer": "Trainer"},
-                    value=S.settings.power_source,
+                    value=self.settings.power_source,
                     on_change=lambda ev: e.devices.set_power_source(ev.value),
                 )
 
@@ -515,7 +452,7 @@ class RidePage:
         self.ensure_chart()
         snap = e.snapshot
         riding = e.ride.state == RideState.RIDING
-        update_main_tiles(e, self.t_power, self.t_target, self.t_hr, self.t_cad)
+        update_main_tiles(e, self.settings, self.t_power, self.t_target, self.t_hr, self.t_cad)
         self.t_speed.set(fmt(snap.speed_kmh, 1))
         self.t_bal.set(
             f"{snap.balance_left:.0f}/{100 - snap.balance_left:.0f}" if snap.balance_left else "--"
@@ -657,27 +594,32 @@ def recovery_dialog(e: Engine) -> None:
     d.open()
 
 
-@ui.page("/")
-def ride_page() -> None:
-    """Ride page: live metrics, workout chart and ride controls."""
-    e = S.engine
-    if S.start_mini:
-        S.start_mini = False
+def build_ride_page(ctx: AppContext) -> None:
+    """Ride page: live metrics, workout chart and ride controls.
+
+    Args:
+        ctx (AppContext): The app's objects.
+    """
+    e = ctx.engine
+    if ctx.window.take_start_request():
         if not e.ride.recoverable_sessions():
             ui.navigate.to("/mini")
             return
-        restore_full_window()  # an unfinished session needs the full page's dialog
-    frame("Ride")
-    page = RidePage(e)
+        ctx.window.restore_full()  # an unfinished session needs the full page's dialog
+    frame(ctx, "Ride")
+    page = RidePage(e, ctx.settings)
     recovery_dialog(e)
     ui.timer(0.5, page.loop)
 
 
 # ===================================================================== MINI
-@ui.page("/mini")
-def mini_page() -> None:
-    """Compact always-on-top overlay: key metrics and basic ride controls."""
-    e = S.engine
+def build_mini_page(ctx: AppContext) -> None:
+    """Compact always-on-top overlay: key metrics and basic ride controls.
+
+    Args:
+        ctx (AppContext): The app's objects.
+    """
+    e, settings = ctx.engine, ctx.settings
     apply_theme()
     with ui.column().classes("mini-page"):
         with ui.row().classes("w-full no-wrap items-stretch gap-2"):
@@ -689,7 +631,7 @@ def mini_page() -> None:
                 t_step = Tile("Interval left", icon="timer", size="sm")
             with ui.column().classes("gap-1 justify-center shrink-0"):
                 btn_start = (
-                    ui.button(icon="play_arrow", on_click=start_ride)
+                    ui.button(icon="play_arrow", on_click=lambda: start_ride(e.ride))
                     .props("color=positive dense")
                     .mark("mini-start")
                     .tooltip("Start")
@@ -706,7 +648,7 @@ def mini_page() -> None:
                     ui.button(icon="add", on_click=lambda: e.ride.change_intensity(0.05)).props(
                         "color=secondary dense"
                     ).mark("mini-plus").tooltip("Intensity +5%")
-                ui.button(icon="open_in_full", on_click=exit_mini).props(
+                ui.button(icon="open_in_full", on_click=ctx.window.exit).props(
                     "color=secondary dense"
                 ).mark("mini-expand").tooltip("Back to the full app")
         with ui.row().classes("w-full items-center no-wrap gap-3"):
@@ -717,13 +659,13 @@ def mini_page() -> None:
                 .classes("step-progress grow")
             )
 
-    cues = CuePlayer(e.ride, lambda: S.settings.interval_cues)
+    cues = CuePlayer(e.ride, lambda: settings.interval_cues)
 
     def refresh() -> None:
         """Update tiles, step line and buttons from the engine state."""
         cues.check()
         riding = e.ride.state == RideState.RIDING
-        update_main_tiles(e, t_power, t_target, t_hr, t_cad)
+        update_main_tiles(e, settings, t_power, t_target, t_hr, t_cad)
         r = e.ride.runner
         if r:
             i, st, into, left = r.current()
@@ -754,66 +696,23 @@ def mini_page() -> None:
 
 
 # ================================================================= WORKOUTS
-def choose_workout(wo: Workout | None) -> None:
-    """Select a workout for the next ride and go to the ride page.
-
-    Args:
-        wo (Workout | None): The workout, or ``None`` for a free ride.
-    """
-    S.engine.ride.select(wo)
-    ui.notify(f"Selected {wo.name}" if wo else "Free ride selected")
-    ui.navigate.to("/")
-
-
-async def import_zwo(ev) -> None:
-    """Parse an uploaded ``.zwo`` file and select it.
-
-    Args:
-        ev (UploadEventArguments): The upload event.
-    """
-    try:
-        wo = parse_zwo(await ev.file.text())
-    except Exception as exc:
-        ui.notify(f"Invalid .zwo file: {exc}", type="negative")
-        return
-    choose_workout(wo)
-
-
-def workout_card(wo: Workout, subtitle: str) -> None:
-    """Render a workout card with its profile and a "Ride this" button.
-
-    Args:
-        wo (Workout): The workout to show.
-        subtitle (str): Text shown under the workout name.
-    """
-    with ui.card().classes("w-full panel gap-2"):
-        with ui.row().classes("items-center w-full"):
-            with ui.column().classes("gap-0"):
-                ui.label(wo.name).classes("list-title")
-                ui.label(f"{subtitle} · {fmt_time(wo.duration_s)} · {len(wo.steps)} steps").classes(
-                    "list-sub"
-                )
-            ui.space()
-            ui.button(
-                "Ride this", icon="play_arrow", on_click=lambda w=wo: choose_workout(w)
-            ).props("color=positive")
-        workout_chart(wo, S.settings.ftp, height="h-28", live=False)
-
-
 class WorkoutsPage:
     """Workouts page widgets: planned workouts, built-ins and .zwo import.
 
     Attributes:
         e (Engine): The application engine.
+        settings (Settings): User settings (FTP and zones for the workout targets).
     """
 
-    def __init__(self, e: Engine) -> None:
+    def __init__(self, e: Engine, settings: Settings) -> None:
         """Build the page and schedule loading the planned workouts.
 
         Args:
             e (Engine): The application engine.
+            settings (Settings): User settings.
         """
         self.e = e
+        self.settings = settings
         with ui.column().classes("page"):
             if selected := e.ride.next_workout:
                 with ui.row().classes("items-center gap-2"):
@@ -825,7 +724,7 @@ class WorkoutsPage:
             ui.label("Built-in workouts").classes("section-title mt-4")
             with ui.column().classes("w-full gap-3"):
                 for wo in builtin_workouts():
-                    workout_card(wo, wo.description)
+                    self.workout_card(wo, wo.description)
         ui.timer(0.1, self.load, once=True)
 
     def _build_toolbar(self) -> None:
@@ -837,17 +736,60 @@ class WorkoutsPage:
             ).classes("section-title")
             ui.space()
             ui.button("Refresh", icon="refresh", on_click=self.load).props("color=secondary")
-            ui.button(
-                "Free ride", icon="all_inclusive", on_click=lambda: choose_workout(None)
-            ).props("color=secondary")
+            ui.button("Free ride", icon="all_inclusive", on_click=lambda: self.choose(None)).props(
+                "color=secondary"
+            )
             uploader = (
-                ui.upload(auto_upload=True, on_upload=import_zwo)
+                ui.upload(auto_upload=True, on_upload=self.import_zwo)
                 .props("accept=.zwo")
                 .classes("hidden")
             )
             ui.button(
                 "Import .zwo", icon="upload_file", on_click=lambda: uploader.run_method("pickFiles")
             ).props("color=secondary")
+
+    def workout_card(self, wo: Workout, subtitle: str) -> None:
+        """Render a workout card with its profile and a "Ride this" button.
+
+        Args:
+            wo (Workout): The workout to show.
+            subtitle (str): Text shown under the workout name.
+        """
+        with ui.card().classes("w-full panel gap-2"):
+            with ui.row().classes("items-center w-full"):
+                with ui.column().classes("gap-0"):
+                    ui.label(wo.name).classes("list-title")
+                    ui.label(
+                        f"{subtitle} · {fmt_time(wo.duration_s)} · {len(wo.steps)} steps"
+                    ).classes("list-sub")
+                ui.space()
+                ui.button(
+                    "Ride this", icon="play_arrow", on_click=lambda w=wo: self.choose(w)
+                ).props("color=positive")
+            workout_chart(wo, self.settings.ftp, height="h-28", live=False)
+
+    def choose(self, wo: Workout | None) -> None:
+        """Select a workout for the next ride and go to the ride page.
+
+        Args:
+            wo (Workout | None): The workout, or ``None`` for a free ride.
+        """
+        self.e.ride.select(wo)
+        ui.notify(f"Selected {wo.name}" if wo else "Free ride selected")
+        ui.navigate.to("/")
+
+    async def import_zwo(self, ev) -> None:
+        """Parse an uploaded ``.zwo`` file and select it.
+
+        Args:
+            ev (UploadEventArguments): The upload event.
+        """
+        try:
+            wo = parse_zwo(await ev.file.text())
+        except Exception as exc:
+            ui.notify(f"Invalid .zwo file: {exc}", type="negative")
+            return
+        self.choose(wo)
 
     async def load(self) -> None:
         """Load planned workouts from the connected services into the listing."""
@@ -868,8 +810,8 @@ class WorkoutsPage:
                 planned += await conn.list_workouts(
                     today - timedelta(days=2),
                     today + timedelta(days=7),
-                    S.settings.ftp,
-                    S.settings.power_zones,
+                    self.settings.ftp,
+                    self.settings.power_zones,
                 )
             except Exception as exc:
                 errors.append(f"Could not load workouts from {conn.name}: {exc}")
@@ -883,14 +825,7 @@ class WorkoutsPage:
         with self.listing:
             for p in planned:
                 label = "Today" if p.day == date.today() else p.day.strftime("%a %d %b")
-                workout_card(p.workout, label)
-
-
-@ui.page("/workouts")
-def workouts_page() -> None:
-    """Workouts page: planned workouts from the connections, built-ins and .zwo import."""
-    frame("Workouts")
-    WorkoutsPage(S.engine)
+                self.workout_card(p.workout, label)
 
 
 # ================================================================== DEVICES
@@ -1080,15 +1015,18 @@ class DevicesPage:
 
     Attributes:
         e (Engine): The application engine.
+        settings (Settings): User settings (current role assignment).
     """
 
-    def __init__(self, e: Engine) -> None:
+    def __init__(self, e: Engine, settings: Settings) -> None:
         """Build the page and refresh the paired devices every 2 s.
 
         Args:
             e (Engine): The application engine.
+            settings (Settings): User settings (current role assignment).
         """
         self.e = e
+        self.settings = settings
         with ui.column().classes("page page-narrow"):
             ui.label("Paired devices").classes("section-title")
             self.paired = ui.column().classes("w-full gap-2")
@@ -1221,20 +1159,13 @@ class DevicesPage:
 
         e = self.e
         dev = e.devices.get(r.address) or make_device(r.drivers[0], r.address, r.name)
-        roles = roles_for(role, S.settings)
+        roles = roles_for(role, self.settings)
         if dev.id in e.devices:
             e.devices.assign(dev.id, roles)
         else:
             e.devices.pair(dev, roles)
         ui.notify(f"{r.name} assigned to {role.value}")
         self.render_paired()
-
-
-@ui.page("/devices")
-def devices_page() -> None:
-    """Devices page: paired devices and BLE scanning/pairing."""
-    frame("Devices")
-    DevicesPage(S.engine)
 
 
 # ================================================================== HISTORY
@@ -1365,13 +1296,6 @@ class HistoryPage:
         await self.render()
 
 
-@ui.page("/history")
-def history_page() -> None:
-    """History page: recorded sessions and manual upload."""
-    frame("History")
-    HistoryPage(S.engine)
-
-
 # ================================================================= SETTINGS
 def profile_summary(st: Settings) -> str:
     """Describe the synced zones and the last sync time.
@@ -1415,14 +1339,15 @@ class SettingsPage:
         st (Settings): User settings edited by the page.
     """
 
-    def __init__(self, e: Engine) -> None:
+    def __init__(self, e: Engine, settings: Settings) -> None:
         """Build the page.
 
         Args:
             e (Engine): The application engine.
+            settings (Settings): User settings.
         """
         self.e = e
-        self.st = S.settings
+        self.st = settings
         with (
             ui.column().classes("page page-narrow [&_.q-field]:w-full"),
             ui.card().classes("w-full panel gap-3"),
@@ -1506,11 +1431,11 @@ class SettingsPage:
         st = self.st
         self.ftp.value, self.weight.value = st.ftp, st.weight_kg
         on = bool(self.sync.value)
-        for field in (self.ftp, self.weight):
+        for number in (self.ftp, self.weight):
             if on:
-                field.props("readonly")
+                number.props("readonly")
             else:
-                field.props(remove="readonly")
+                number.props(remove="readonly")
         self.sync_btn.set_visibility(on)
         self.summary.set_visibility(on)
         self.summary.set_text(profile_summary(st))
@@ -1591,8 +1516,45 @@ class SettingsPage:
         self.st.update(auto_upload=bool(self.auto.value))
 
 
-@ui.page("/settings")
-def settings_page() -> None:
-    """Settings page: rider profile, connections and power matching."""
-    frame("Settings")
-    SettingsPage(S.engine)
+def register_pages(ctx: AppContext) -> None:
+    """Register every page and route, each built with the app's objects.
+
+    Args:
+        ctx (AppContext): The app's objects.
+    """
+
+    @ui.page("/")
+    def ride_page() -> None:
+        """Ride page: live metrics, workout chart and ride controls."""
+        build_ride_page(ctx)
+
+    @ui.page("/mini")
+    def mini_page() -> None:
+        """Compact always-on-top overlay: key metrics and basic ride controls."""
+        build_mini_page(ctx)
+
+    @ui.page("/workouts")
+    def workouts_page() -> None:
+        """Workouts page: planned workouts from the connections, built-ins and .zwo import."""
+        frame(ctx, "Workouts")
+        WorkoutsPage(ctx.engine, ctx.settings)
+
+    @ui.page("/devices")
+    def devices_page() -> None:
+        """Devices page: paired devices and BLE scanning/pairing."""
+        frame(ctx, "Devices")
+        DevicesPage(ctx.engine, ctx.settings)
+
+    @ui.page("/history")
+    def history_page() -> None:
+        """History page: recorded sessions and manual upload."""
+        frame(ctx, "History")
+        HistoryPage(ctx.engine)
+
+    @ui.page("/settings")
+    def settings_page() -> None:
+        """Settings page: rider profile, connections and power matching."""
+        frame(ctx, "Settings")
+        SettingsPage(ctx.engine, ctx.settings)
+
+    connections.register_strava_callback(ctx.settings)
