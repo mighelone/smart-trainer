@@ -117,30 +117,31 @@ def engine(tmp_path, settings):
 
 
 async def test_engine_sync_profile_updates_and_saves(engine, settings):
-    changed = await engine.sync.sync_profile()
-    assert "FTP" in changed and "weight" in changed
+    result = await engine.sync.sync_profile()
+    assert result.skipped is None
+    assert "FTP" in result.changed and "weight" in result.changed
     assert settings.ftp == 265
     assert settings.profile_synced_at is not None
     assert Settings.load().ftp == 265  # persisted
-    assert await engine.sync.sync_profile() == []  # nothing new
+    assert (await engine.sync.sync_profile()).changed == []  # nothing new
 
 
 async def test_engine_sync_profile_skipped(engine, settings, tmp_path):
     engine.ride.state = RideState.RIDING
-    assert await engine.sync.sync_profile() is None
-    assert settings.ftp == 200 and "ride" in engine.messages[-1]
+    assert (await engine.sync.sync_profile()).skipped == "Profile sync skipped during a ride"
+    assert settings.ftp == 200
     engine.ride.state = RideState.IDLE
     settings.readonly = True
-    assert await engine.sync.sync_profile() is None
+    assert (await engine.sync.sync_profile()).skipped == "Demo mode: profile sync is disabled"
     assert settings.ftp == 200
     no_account = _make_engine(tmp_path, None)
-    assert await no_account.sync.sync_profile() is None
-    assert "No profile connection" in no_account.messages[-1]
+    result = await no_account.sync.sync_profile()
+    assert result.skipped == "No profile connection configured: profile not synced"
 
 
 async def test_engine_sync_profile_error(tmp_path):
     settings = Settings(ftp=200, auto_upload=False)
     engine = _make_engine(tmp_path, lambda r: httpx.Response(401), settings)
-    assert await engine.sync.sync_profile() is None
-    assert "rejected" in engine.messages[-1]
+    result = await engine.sync.sync_profile()
+    assert result.skipped and "rejected" in result.skipped and result.changed == []
     assert settings.profile_synced_at is None

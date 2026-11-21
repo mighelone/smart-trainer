@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from pathlib import Path
 from typing import Literal
 
 from smart_trainer.config import Settings
@@ -15,7 +13,7 @@ from smart_trainer.core.cadence import CadenceCheck
 from smart_trainer.core.control import Mode, TrainerController
 from smart_trainer.core.history import History, HistoryPoint
 from smart_trainer.core.recorder import Recorder, SessionInfo
-from smart_trainer.core.sessions import SessionStore
+from smart_trainer.core.sessions import FinishResult, SessionStore
 from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import Step, Workout, WorkoutRunner
 
@@ -71,7 +69,6 @@ class Ride:
         settings (Settings): User settings; FTP is read when a ride starts.
         controller (TrainerController): Trainer control, switched ERG/resistance.
         store (SessionStore): Creates and finalizes session files.
-        messages (deque[str]): User-facing status messages.
         tick_s (float): Seconds per :meth:`tick`.
         blocker (Callable[[], str | None]): Returns why a ride can't start now
             (e.g. a calibration is running), or ``None``.
@@ -92,7 +89,6 @@ class Ride:
     settings: Settings = field(repr=False)
     controller: TrainerController = field(repr=False)
     store: SessionStore = field(repr=False)
-    messages: deque[str] = field(repr=False)
     tick_s: float
     blocker: Callable[[], str | None] = field(default=_no_blocker, repr=False)
     state: RideState = field(default=RideState.IDLE, init=False)
@@ -108,7 +104,6 @@ class Ride:
     cadence_check: CadenceCheck = field(default_factory=CadenceCheck, init=False, repr=False)
     _cued_step: int | None = field(default=None, init=False, repr=False)
     _last_step: int | None = field(default=None, init=False, repr=False)
-    _completed_announced: bool = field(default=False, init=False, repr=False)
 
     @property
     def active(self) -> bool:
@@ -118,6 +113,16 @@ class Ride:
             bool: ``True`` unless idle.
         """
         return self.state != RideState.IDLE
+
+    @property
+    def workout_complete(self) -> bool:
+        """Whether the workout has ended while the rider keeps riding.
+
+        Returns:
+            bool: ``True`` once every step is done, until the ride finishes; always
+            ``False`` in a free ride.
+        """
+        return self.runner is not None and self.runner.finished
 
     # ---------------------------------------------------------------- lifecycle
     def select(self, workout: Workout | None) -> None:
@@ -144,7 +149,7 @@ class Ride:
         self.runner = WorkoutRunner(workout, ftp) if workout and workout.steps else None
         self.seconds = 0.0
         self.history.restart()
-        self._begin("Ride started")
+        self._begin()
 
     def resume(self, info: SessionInfo) -> None:
         """Continue a crashed session: same file, workout resumes at the saved elapsed time.
@@ -175,7 +180,7 @@ class Ride:
                 )
             )
         self.seconds = active
-        self._begin("Session resumed")
+        self._begin()
 
     def _check_can_start(self) -> None:
         """Refuse to start when the blocker gives a reason.
@@ -186,23 +191,17 @@ class Ride:
         if reason := self.blocker():
             raise RuntimeError(reason)
 
-    def _begin(self, message: str) -> None:
-        """Enter the riding state.
-
-        Args:
-            message (str): Status message to post.
-        """
+    def _begin(self) -> None:
+        """Enter the riding state."""
         self.state = RideState.RIDING
         self.manual_pause = False
-        self._completed_announced = False
         self._cued_step = None
         self.cadence_check.reset()
         self._last_step = self.runner.step_index() if self.runner else None
         if self.runner is None:
             self.controller.set_mode(Mode.RESISTANCE)
-        self.messages.append(message)
 
-    async def finish(self, upload: bool | None = None) -> Path | None:
+    async def finish(self, upload: bool | None = None) -> FinishResult:
         """Stop recording, export FIT, and optionally upload.
 
         Args:
@@ -210,11 +209,12 @@ class Ride:
                 ``auto_upload`` setting.
 
         Returns:
-            Path | None: The FIT file path, or ``None`` if nothing was recorded.
+            FinishResult: The FIT file (``None`` if nothing was recorded) and the upload
+            outcome.
         """
         self.next_workout = None  # the selection was for this ride
         if not self.recorder:
-            return None
+            return FinishResult()
         self.state = RideState.FINISHING
         rec = self.recorder
         try:
@@ -295,9 +295,6 @@ class Ride:
             self.recorder.new_lap()
         self._last_step = idx
         self._announce_step_change(paused)
-        if self.runner.finished and target is None and not self._completed_announced:
-            self._completed_announced = True
-            self.messages.append("Workout complete! Keep riding or press Finish.")
         return target
 
     def _announce_step_change(self, paused: bool) -> None:

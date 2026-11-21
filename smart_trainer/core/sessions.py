@@ -4,19 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 from smart_trainer.core.recorder import Recorder, SessionInfo, read_info
 from smart_trainer.core.workout import Workout
 from smart_trainer.export.fit import export_fit
 from smart_trainer.sync.base import RideUpload
-from smart_trainer.sync.service import SyncService, SyncUnavailable
+from smart_trainer.sync.service import SyncService, UploadReport
 
 log = logging.getLogger(__name__)
 
 # What a session file looks like on disk: (mtime_ns, size) of the database and of its WAL
 StatKey = tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class FinishResult:
+    """What finishing a session produced.
+
+    Attributes:
+        fit (Path | None): The FIT file, or ``None`` if the session has no samples.
+        upload (UploadReport | None): The upload outcome, or ``None`` if no upload was
+            attempted (uploads off, or nothing recorded).
+    """
+
+    fit: Path | None = None
+    upload: UploadReport | None = None
 
 
 def _stat_key(path: Path) -> StatKey:
@@ -62,17 +76,15 @@ class SessionStore:
         directory (Path): Directory where sessions are recorded.
     """
 
-    def __init__(self, directory: Path, sync: SyncService, messages: deque[str]) -> None:
+    def __init__(self, directory: Path, sync: SyncService) -> None:
         """Initialize the store.
 
         Args:
             directory (Path): Directory where sessions are recorded.
             sync (SyncService): Uploads finished sessions.
-            messages (deque[str]): User-facing status messages.
         """
         self.directory = directory
         self._sync = sync
-        self._messages = messages
         self._cache: dict[Path, tuple[StatKey, SessionInfo]] = {}
 
     def list_sessions(self, limit: int | None = None) -> list[SessionInfo]:
@@ -131,7 +143,7 @@ class SessionStore:
         """
         return Recorder.open(info.path)
 
-    async def finalize(self, rec: Recorder, upload: bool | None = None) -> Path | None:
+    async def finalize(self, rec: Recorder, upload: bool | None = None) -> FinishResult:
         """Export a session to FIT, mark it finished and optionally upload it.
 
         Args:
@@ -140,19 +152,20 @@ class SessionStore:
                 ``False`` never uploads, ``None`` follows the automatic upload settings.
 
         Returns:
-            Path | None: The FIT file path, or ``None`` if the session has no samples.
+            FinishResult: The FIT file and the upload outcome.
         """
         info = rec.info()
         fit = None
         if info.n_samples:  # off the event loop: a long ride takes a while to export
             fit = await asyncio.to_thread(_export_fit, rec.path)
         rec.set_status("finished")
+        report = None
         if fit and upload is None:
             if targets := self._sync.auto_upload_targets():
-                await self.upload(rec, fit, info, targets)
+                report = await self.upload(rec, fit, info, targets)
         elif fit and upload:
-            await self.upload(rec, fit, info)
-        return fit
+            report = await self.upload(rec, fit, info)
+        return FinishResult(fit, report)
 
     async def upload(
         self,
@@ -160,7 +173,7 @@ class SessionStore:
         fit: Path,
         info: SessionInfo | None = None,
         targets: list[str] | None = None,
-    ) -> dict[str, bool]:
+    ) -> UploadReport:
         """Upload a FIT file to the connections and record each outcome in the session.
 
         Connections the session was already uploaded to are skipped.
@@ -173,8 +186,7 @@ class SessionStore:
                 enabled, configured upload connection.
 
         Returns:
-            dict[str, bool]: Whether the upload succeeded, by connection id (empty if
-            nothing was attempted; a message explains why).
+            UploadReport: One result per connection tried, or why nothing was tried.
         """
         info = info or rec.info()
         ride = RideUpload(
@@ -184,22 +196,19 @@ class SessionStore:
             workout_source_id=info.workout.source_id if info.workout else None,
         )
         done = {cid for cid, state in info.uploads.items() if state.done}
-        try:
-            outcomes = await self._sync.upload(ride, targets, skip=done)
-        except SyncUnavailable:
-            return {}  # nothing was attempted: the session stays as it is
-        for cid, (aid, err) in outcomes.items():
-            rec.set_upload(cid, aid, err)
-        return {cid: err is None for cid, (_, err) in outcomes.items()}
+        report = await self._sync.upload(ride, targets, skip=done)
+        for result in report.results:
+            rec.set_upload(result.connection_id, result.activity_id, result.error)
+        return report
 
-    async def upload_session(self, info: SessionInfo) -> dict[str, bool]:
+    async def upload_session(self, info: SessionInfo) -> UploadReport:
         """Upload an already finished session where it's still missing.
 
         Args:
             info (SessionInfo): The session; its FIT file must exist.
 
         Returns:
-            dict[str, bool]: Whether the upload succeeded, by connection id.
+            UploadReport: One result per connection tried, or why nothing was tried.
         """
         rec = self.open(info)
         try:
@@ -207,7 +216,7 @@ class SessionStore:
         finally:
             rec.close()
 
-    async def finish_crashed(self, info: SessionInfo, upload: bool | None = None) -> Path | None:
+    async def finish_crashed(self, info: SessionInfo, upload: bool | None = None) -> FinishResult:
         """Finalize a crashed session without resuming it.
 
         Args:
@@ -216,7 +225,7 @@ class SessionStore:
                 ``False`` never uploads, ``None`` follows the automatic upload settings.
 
         Returns:
-            Path | None: The FIT file path, or ``None`` if the session has no samples.
+            FinishResult: The FIT file and the upload outcome.
         """
         rec = self.open(info)
         try:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections import deque
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
@@ -61,14 +60,12 @@ class SettingsPage:
 
     Attributes:
         sync_service (SyncService): Connections (profile sync, connection cards).
-        messages (deque[str]): Status messages from the core, shown when a sync fails.
         st (Settings): User settings edited by the page.
     """
 
     def __init__(
         self,
         sync: SyncService,
-        messages: deque[str],
         settings: Settings,
         set_spiral_guard: Callable[[bool], None],
         forms: Mapping[str, FormFactory],
@@ -77,14 +74,12 @@ class SettingsPage:
 
         Args:
             sync (SyncService): Connections (profile sync, connection cards).
-            messages (deque[str]): Status messages from the core.
             settings (Settings): User settings.
             set_spiral_guard (Callable[[bool], None]): Turns the ERG spiral guard on or off
                 (saves the setting and applies it to the trainer control).
             forms (Mapping[str, FormFactory]): Each connection's own settings form, by id.
         """
         self.sync_service = sync
-        self.messages = messages
         self._set_spiral_guard = set_spiral_guard
         self.forms = forms
         self.st = settings
@@ -184,12 +179,13 @@ class SettingsPage:
         """Fetch the profile and show the result."""
         self.sync_btn.props("loading")
         try:
-            changed = await self.sync_service.sync_profile()
+            result = await self.sync_service.sync_profile()
         finally:
             self.sync_btn.props(remove="loading")
-        if changed is None:
-            ui.notify(self.messages[-1] if self.messages else "Sync failed", type="negative")
+        if result.skipped:
+            ui.notify(result.skipped, type="negative")
         else:
+            changed = result.changed
             text = f"Updated {', '.join(changed)}" if changed else "Already up to date"
             ui.notify(text, type="positive")
         self.refresh_profile()

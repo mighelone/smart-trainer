@@ -22,7 +22,6 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
@@ -50,7 +49,6 @@ class Engine:
 
     Attributes:
         settings (Settings): User settings, shared with the components.
-        messages (deque[str]): User-facing status messages, shared by the components.
         selector (SourceSelector): Resolves readings into snapshots.
         controller (TrainerController): Trainer control logic.
         devices (DeviceHub): Active devices and their roles.
@@ -66,7 +64,6 @@ class Engine:
     """
 
     settings: Settings
-    messages: deque[str]
     selector: SourceSelector
     controller: TrainerController
     devices: DeviceHub
@@ -103,7 +100,6 @@ class Engine:
         Returns:
             Engine: A ready engine; enter it with ``async with`` to run it.
         """
-        messages: deque[str] = deque(maxlen=20)
         selector = SourceSelector()
         guard = SpiralGuard() if settings.erg_spiral_guard else None
         controller = TrainerController(settings.power_match, guard)
@@ -121,13 +117,12 @@ class Engine:
             """
             return ride.active
 
-        sync = SyncService(settings, messages, connections or (lambda: []), ride_active)
-        store = SessionStore(sessions or sessions_dir(), sync, messages)
-        calibration = CalibrationService(devices, controller, messages, ride_active)
-        ride = Ride(settings, controller, store, messages, tick_s, blocker=calibration.ride_blocker)
+        sync = SyncService(settings, connections or (lambda: []), ride_active)
+        store = SessionStore(sessions or sessions_dir(), sync)
+        calibration = CalibrationService(devices, controller, ride_active)
+        ride = Ride(settings, controller, store, tick_s, blocker=calibration.ride_blocker)
         return cls(
             settings=settings,
-            messages=messages,
             selector=selector,
             controller=controller,
             devices=devices,
