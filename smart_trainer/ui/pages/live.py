@@ -7,7 +7,9 @@ from nicegui import ui
 from smart_trainer.config import Settings
 from smart_trainer.core.control import SPIRAL_RESUME_RPM, Mode
 from smart_trainer.core.ride import Ride, RideState
+from smart_trainer.core.sessions import FinishResult
 from smart_trainer.core.state import Role, Snapshot
+from smart_trainer.sync.service import UploadReport
 from smart_trainer.ui.context import LiveRide
 from smart_trainer.ui.widgets.text import fmt
 from smart_trainer.ui.widgets.tiles import Tile, cadence_display, hr_zone, power_zone
@@ -28,8 +30,30 @@ def start_ride(ride: Ride) -> None:
     ui.notify(f"Started: {workout.name if workout else 'free ride'}")
 
 
+def notify_upload(report: UploadReport) -> None:
+    """Show the outcome of an upload, one notification per line.
+
+    Args:
+        report (UploadReport): The upload outcome.
+    """
+    for line in report.messages:
+        ui.notify(line, type="positive" if report.ok else "negative")
+
+
+def notify_finish(result: FinishResult) -> None:
+    """Show what finishing a session saved and uploaded.
+
+    Args:
+        result (FinishResult): The finished session.
+    """
+    fit = result.fit
+    ui.notify(f"Saved {fit.name}" if fit else "Nothing recorded", type="positive")
+    if result.upload:
+        notify_upload(result.upload)
+
+
 def ride_status(live: LiveRide) -> list[str]:
-    """Status messages for the ride (pause, auto-pause, ERG release, device warnings).
+    """Status messages for the ride (pause, ERG release, workout end, device warnings).
 
     Args:
         live (LiveRide): The ride state the live screens read.
@@ -45,6 +69,8 @@ def ride_status(live: LiveRide) -> list[str]:
         status.append("Auto-paused: start pedalling")
     elif ride.state == RideState.RIDING and live.controller.erg_released:
         status.append(f"ERG released: spin up to {SPIRAL_RESUME_RPM} rpm")
+    elif ride.state == RideState.RIDING and ride.workout_complete:
+        status.append("Workout complete: keep riding or press Finish")
     elif ride.cadence_alert and ride.cadence_target is not None:
         cad = fmt(snapshot.cadence)
         status.append(f"Cadence {ride.cadence_alert}: {cad} / {ride.cadence_target} rpm")

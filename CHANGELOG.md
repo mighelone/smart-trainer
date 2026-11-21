@@ -10,6 +10,13 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Fixed
+- "Workout complete: keep riding or press Finish" now shows in the ride status (ride screen and
+  mini overlay) once the last interval ends; before, the message was never displayed.
+- Upload and profile-sync notifications show only the outcome of your own action: with the ride
+  screen open on a Mac and an iPad, one no longer shows the other's messages.
+- Finishing an unfinished session from the recovery dialog now reports the upload result.
+
 ## [0.4.1] - 2026-11-21
 
 ### Added

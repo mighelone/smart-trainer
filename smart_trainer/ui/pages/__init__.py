@@ -71,10 +71,10 @@ def _register_setup_pages(ctx: AppContext) -> None:
     def history_page() -> None:
         """History page: recorded sessions and manual upload."""
         frame(ctx, "History")
-        HistoryPage(engine.store, engine.sync, engine.messages)
+        HistoryPage(engine.store, engine.sync)
 
     @ui.page("/settings")
     def settings_page() -> None:
         """Settings page: rider profile, connections and power matching."""
         frame(ctx, "Settings")
-        SettingsPage(engine.sync, engine.messages, ctx.settings, engine.set_spiral_guard, forms)
+        SettingsPage(engine.sync, ctx.settings, engine.set_spiral_guard, forms)

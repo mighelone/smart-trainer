@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 
 from nicegui import ui
 
@@ -11,6 +10,7 @@ from smart_trainer.core.recorder import SessionInfo, UploadState
 from smart_trainer.core.sessions import SessionStore
 from smart_trainer.sync.base import Capability, Connection
 from smart_trainer.sync.service import SyncService
+from smart_trainer.ui.pages.live import notify_upload
 from smart_trainer.ui.widgets.text import fmt_time
 
 
@@ -56,22 +56,19 @@ class HistoryPage:
     Attributes:
         store (SessionStore): Recorded sessions.
         sync (SyncService): Connections that upload rides.
-        messages (deque[str]): Status messages from the core, shown after an upload.
     """
 
     PAGE_SIZE = 30
 
-    def __init__(self, store: SessionStore, sync: SyncService, messages: deque[str]) -> None:
+    def __init__(self, store: SessionStore, sync: SyncService) -> None:
         """Build the page and schedule loading the sessions.
 
         Args:
             store (SessionStore): Recorded sessions.
             sync (SyncService): Connections that upload rides.
-            messages (deque[str]): Status messages from the core.
         """
         self.store = store
         self.sync = sync
-        self.messages = messages
         self.limit = self.PAGE_SIZE
         with ui.column().classes("page page-narrow"):
             ui.label("Sessions").classes("section-title")
@@ -143,9 +140,5 @@ class HistoryPage:
         Args:
             session (SessionInfo): The session to upload.
         """
-        seen = len(self.messages)
-        result = await self.store.upload_session(session)
-        ok = bool(result) and all(result.values())
-        for message in list(self.messages)[seen:]:
-            ui.notify(message, type="positive" if ok else "negative")
+        notify_upload(await self.store.upload_session(session))
         await self.render()

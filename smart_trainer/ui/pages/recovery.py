@@ -9,6 +9,7 @@ from nicegui import ui
 from smart_trainer.core.recorder import SessionInfo
 from smart_trainer.core.ride import Ride, RideState
 from smart_trainer.core.sessions import SessionStore
+from smart_trainer.ui.pages.live import notify_finish
 from smart_trainer.ui.widgets.text import fmt_time
 
 
@@ -70,8 +71,7 @@ class RecoveryDialog:
     async def finish(self) -> None:
         """Finalize the unfinished session without resuming it."""
         self.dialog.close()
-        fit = await self.store.finish_crashed(self.info)
-        ui.notify(f"Saved {fit.name if fit else 'session'}")
+        notify_finish(await self.store.finish_crashed(self.info))
 
     async def discard(self) -> None:
         """Move the unfinished session to the discarded folder."""

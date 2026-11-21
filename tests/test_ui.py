@@ -314,6 +314,20 @@ async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeyp
     await user.should_see("ERG released: spin up to 70 rpm", retries=20)
 
 
+async def test_ride_status_shows_workout_complete(user: User, engine, pages):
+    from smart_trainer.core.workout import Step, Workout
+
+    engine.ride.select(Workout("Short", [Step(60, 1.0)]))
+    await user.open("/")
+    user.find("Start").click()
+    assert engine.ride.runner is not None
+    assert not any("Workout complete" in line for line in ride_status(LiveRide.of(engine)))
+    engine.ride.runner.advance(61)
+    await user.should_see("Workout complete: keep riding or press Finish", retries=20)
+    await user.open("/mini")
+    await user.should_see("Workout complete: keep riding or press Finish", retries=20)
+
+
 async def test_settings_switch_turns_the_spiral_guard_off(user: User, engine, pages):
     from smart_trainer.core.control import SpiralGuard
 
@@ -462,6 +476,15 @@ async def test_recovery_dialog_discards_an_unfinished_session(user: User, engine
     await user.should_see("Session moved to sessions/discarded", retries=20)
     assert not engine.ride.recoverable_sessions()
     assert list((engine.store.directory / "discarded").iterdir())
+
+
+async def test_recovery_dialog_finishes_an_unfinished_session(user: User, engine):
+    _unfinished_session(engine.store.directory)
+    await user.open("/")
+    await user.should_see("Unfinished session found", retries=20)
+    user.find("Finish & save").click()
+    await user.should_see("Saved session-", retries=20)
+    assert not engine.ride.recoverable_sessions()
 
 
 def _charts(user: User) -> list[ui.echart]:

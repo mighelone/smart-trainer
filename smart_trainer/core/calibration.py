@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import deque
 from collections.abc import Callable, Mapping
 
 from smart_trainer.ble.device import (
@@ -33,7 +32,6 @@ class CalibrationService:
         self,
         devices: Mapping[str, Device],
         controller: TrainerController,
-        messages: deque[str],
         ride_active: Callable[[], bool],
     ) -> None:
         """Initialize the service.
@@ -41,12 +39,10 @@ class CalibrationService:
         Args:
             devices (Mapping[str, Device]): Active devices by id.
             controller (TrainerController): Trainer control, resent after a calibration.
-            messages (deque[str]): User-facing status messages.
             ride_active (Callable[[], bool]): Whether a ride is in progress.
         """
         self._devices = devices
         self._controller = controller
-        self._messages = messages
         self._ride_active = ride_active
         self.device_id: str | None = None
         self.progress: CalibrationProgress | None = None
@@ -124,7 +120,6 @@ class CalibrationService:
             result = await dev.calibrate(on_progress)
         except CalibrationError as exc:
             self.progress = CalibrationProgress(CalibrationPhase.FAILED, str(exc))
-            self._messages.append(f"{dev.name}: calibration failed")
             raise
         except asyncio.CancelledError:
             self.progress = CalibrationProgress(CalibrationPhase.FAILED, "Calibration cancelled.")
@@ -138,5 +133,4 @@ class CalibrationService:
             self.device_id = None
             self._controller.force_resend()
         self.progress = CalibrationProgress(CalibrationPhase.DONE, result.message, fraction=1.0)
-        self._messages.append(f"{dev.name}: {result.message}")
         return result

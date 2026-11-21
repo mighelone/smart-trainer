@@ -1,7 +1,6 @@
 """SessionStore: cached session listing and FIT export off the event loop."""
 
 import threading
-from collections import deque
 
 import fitdecode
 
@@ -16,8 +15,8 @@ from smart_trainer.sync.service import SyncService
 def _store(tmp_path) -> SessionStore:
     st = Settings(ftp=200, auto_upload=False)
     st.readonly = True
-    sync = SyncService(st, deque(), lambda: [], ride_active=lambda: False)
-    return SessionStore(tmp_path, sync, deque())
+    sync = SyncService(st, lambda: [], ride_active=lambda: False)
+    return SessionStore(tmp_path, sync)
 
 
 def _session(store: SessionStore, name: str, now: float, samples: int = 3) -> Recorder:
@@ -102,7 +101,7 @@ async def test_finalize_exports_fit_in_a_worker_thread(tmp_path, monkeypatch):
         return real(path)
 
     monkeypatch.setattr(sessions_mod, "_export_fit", spy)
-    fit = await store.finalize(rec, upload=False)
+    fit = (await store.finalize(rec, upload=False)).fit
     rec.close()
     assert threads and threads[0] is not threading.main_thread()
     assert fit is not None and fit.exists()

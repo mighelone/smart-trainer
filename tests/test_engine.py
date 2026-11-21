@@ -9,7 +9,7 @@ from smart_trainer.core.control import SPIRAL_RELEASE_SLOPE, Mode, SpiralGuard
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.recorder import find_unfinished
 from smart_trainer.core.ride import MAX_TICK_DT_S, RideState
-from smart_trainer.core.state import Role
+from smart_trainer.core.state import Role, Snapshot
 from smart_trainer.core.workout import Step, Workout
 
 
@@ -41,7 +41,7 @@ async def test_erg_workout_with_pedal_power_matching(tmp_path):
         assert engine.controller.mode == Mode.ERG and trainer.mode == "erg"
         assert abs(world.true_power - 200) < 6, world.true_power  # pedals hit the target
         assert trainer.value > 205  # trainer was asked for more to compensate its over-reading
-        fit = await engine.ride.finish()
+        fit = (await engine.ride.finish()).fit
         assert fit and fit.exists() and engine.ride.state == RideState.IDLE
         assert find_unfinished(tmp_path) == []
 
@@ -102,12 +102,19 @@ async def test_context_manager_runs_and_stops_the_loop(tmp_path):
     assert task.cancelled() and engine._task is None
 
 
-async def test_workout_complete_announced_once(tmp_path):
+@pytest.mark.parametrize(
+    ("workout", "seconds", "complete"),
+    [
+        (Workout("T", [Step(3, 1.0)]), 2, False),  # still running
+        (Workout("T", [Step(3, 1.0)]), 8, True),  # past its end, still riding
+        (None, 8, False),  # a free ride never completes
+    ],
+)
+async def test_workout_complete(tmp_path, workout, seconds, complete):
     async with _engine(tmp_path) as (engine, trainer, world):
-        engine.ride.start(Workout("T", [Step(3, 1.0)]))
-        engine.messages.append("Calibration complete")  # must not suppress the announcement
-        await _ride(engine, 8, 1_700_000_000)
-        assert sum("Workout complete" in m for m in engine.messages) == 1
+        engine.ride.start(workout)
+        await _ride(engine, seconds, 1_700_000_000)
+        assert engine.ride.workout_complete is complete
 
 
 @pytest.fixture
@@ -129,6 +136,21 @@ async def test_selected_workout_is_kept_until_the_ride_finishes(ride):
     assert ride.next_workout is workout
     await ride.finish()
     assert ride.next_workout is None
+
+
+async def test_finish_returns_the_fit_and_the_upload_report(ride):
+    ride.start(None)
+    ride.tick(Snapshot(power=200, cadence=90), now_wall=1_700_000_000)
+    result = await ride.finish(upload=True)
+    assert result.fit and result.fit.exists()
+    assert result.upload and result.upload.messages == [
+        "No connection to upload to: saved locally only"
+    ]
+
+
+async def test_finishing_an_idle_ride_records_nothing(ride):
+    result = await ride.finish()
+    assert result.fit is None and result.upload is None
 
 
 async def test_selecting_during_a_ride_leaves_it_alone(ride):

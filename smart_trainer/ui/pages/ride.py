@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
-
 from nicegui import ui
 
 from smart_trainer.config import Settings
@@ -12,7 +10,7 @@ from smart_trainer.core.ride import RideState
 from smart_trainer.core.workout import WorkoutRunner
 from smart_trainer.ui.context import AppContext, LiveRide
 from smart_trainer.ui.pages.frame import frame
-from smart_trainer.ui.pages.live import MainTiles, ride_status, start_ride
+from smart_trainer.ui.pages.live import MainTiles, notify_finish, ride_status, start_ride
 from smart_trainer.ui.pages.recovery import RecoveryDialog
 from smart_trainer.ui.widgets.charts import LiveChart, workout_chart
 from smart_trainer.ui.widgets.cues import CuePlayer
@@ -38,22 +36,19 @@ class RidePage:
         ride (Ride): The ride.
         controller (TrainerController): Trainer control (manual mode).
         devices (DeviceHub): Devices and their roles (power source).
-        messages (deque[str]): Status messages from the core, shown after finishing.
         settings (Settings): User settings (FTP, zones, cues).
         ftp (int): FTP used to draw the workout chart.
     """
 
-    def __init__(self, live: LiveRide, messages: deque[str], settings: Settings) -> None:
+    def __init__(self, live: LiveRide, settings: Settings) -> None:
         """Build the page.
 
         Args:
             live (LiveRide): The ride state shown and controlled.
-            messages (deque[str]): Status messages from the core.
             settings (Settings): User settings.
         """
         self.live_ride = live
         self.ride, self.controller, self.devices = live.ride, live.controller, live.devices
-        self.messages = messages
         self.settings = settings
         self.ftp = settings.ftp
         self.chart = None
@@ -187,12 +182,9 @@ class RidePage:
         """
         dialog.close()
         notification = ui.notification("Saving session…", spinner=True, timeout=None)
-        seen = len(self.messages)
-        fit = await self.ride.finish(upload=upload)
+        result = await self.ride.finish(upload=upload)
         notification.dismiss()
-        ui.notify(f"Saved {fit.name}" if fit else "Nothing recorded", type="positive")
-        for message in list(self.messages)[seen:]:
-            ui.notify(message)
+        notify_finish(result)
 
     def confirm_finish(self) -> None:
         """Ask the rider how to finish the session."""
@@ -336,6 +328,6 @@ def build_ride_page(ctx: AppContext) -> None:
             return
         ctx.window.restore_full()  # an unfinished session needs the full page's dialog
     frame(ctx, "Ride")
-    page = RidePage(LiveRide.of(engine), engine.messages, ctx.settings)
+    page = RidePage(LiveRide.of(engine), ctx.settings)
     RecoveryDialog.offer(engine.ride, engine.store)
     ui.timer(0.5, page.loop)
