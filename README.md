@@ -112,6 +112,8 @@ launch offers **Resume** (continues the workout where it stopped), **Finish & sa
 (Discard moves the session to `sessions/discarded/`).
 
 ## Layout
+How the core and the UI work together is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 | Path | What |
 |---|---|
 | `smart_trainer/ble/` | BLE drivers (`ftms.py`, `cycling_power.py`, `heart_rate.py`, `fake.py`) and their payload parsers (`parsers/`) |
