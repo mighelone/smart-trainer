@@ -10,11 +10,13 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-11-21
+## [0.4.2] - 2026-11-21
 
 ### Added
 - The Mac app and its DMG have their own icon: a power dial in the ride screen's zone colours,
   instead of the generic Python one.
+
+## [0.4.1] - 2026-11-21
 
 ### Fixed
 - Dragging the manual slider after switching to **Fixed ERG** or **Slope** no longer freezes the
@@ -134,9 +136,10 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 - Mac app (Apple Silicon) as a DMG, built and attached to GitHub Releases by the release workflow.
 - Installation guide ([INSTALL.md](INSTALL.md)).
 
-[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.4.2...HEAD
 [0.1.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.1.0
 [0.2.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.2.0
 [0.3.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.3.0
 [0.4.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.4.0
 [0.4.1]: https://github.com/mighelone/smart-trainer/releases/tag/v0.4.1
+[0.4.2]: https://github.com/mighelone/smart-trainer/releases/tag/v0.4.2
