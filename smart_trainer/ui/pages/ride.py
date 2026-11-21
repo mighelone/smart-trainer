@@ -20,11 +20,13 @@ from smart_trainer.ui.widgets.text import fmt, fmt_time, next_step_text, step_ti
 from smart_trainer.ui.widgets.tiles import Tile
 
 MANUAL_UNIT = {"resistance": "%", "slope": "% grade", "erg": " W"}
-# Slider range per manual mode: resistance in %, slope in % grade, ERG in watts
+# Slider range per manual mode: resistance in %, slope in % grade, ERG in watts. Numbers, not
+# a props string: `props("min=50")` sends "50" and Quasar's drag maths (`min + ratio * span`)
+# then concatenates strings and throws, leaving the slider stuck mid-drag.
 MANUAL_SLIDER = {
-    Mode.RESISTANCE: "min=0 max=100 step=1",
-    Mode.SLOPE: "min=-10 max=20 step=0.5",
-    Mode.ERG: "min=50 max=600 step=5",
+    Mode.RESISTANCE: {"min": 0, "max": 100, "step": 1},
+    Mode.SLOPE: {"min": -10, "max": 20, "step": 0.5},
+    Mode.ERG: {"min": 50, "max": 600, "step": 5},
 }
 
 
@@ -127,12 +129,11 @@ class RidePage:
         with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-6 w-full"):
             with ui.row().classes("items-center gap-4 grow no-wrap") as self.manual_box:
                 ui.label("Manual").classes("field-label")
+                mode = self.controller.mode if self.ride.runner is None else Mode.RESISTANCE
                 self.mode = (
                     ui.toggle(
                         {"resistance": "Resistance", "slope": "Slope", "erg": "Fixed ERG"},
-                        value=self.controller.mode.value
-                        if self.ride.runner is None
-                        else "resistance",
+                        value=mode.value,
                         on_change=lambda ev: self.set_manual_mode(ev.value),
                     )
                     .classes("shrink-0")
@@ -140,10 +141,8 @@ class RidePage:
                 )
                 self.slider = (
                     ui.slider(
-                        min=0,
-                        max=100,
-                        step=1,
-                        value=self.controller.resistance_pct,
+                        **MANUAL_SLIDER[mode],
+                        value=self.controller.target_for(mode),
                         on_change=lambda ev: self.set_manual_value(ev.value),
                     )
                     .classes("grow min-w-[120px]")
@@ -167,7 +166,7 @@ class RidePage:
         """
         controller, mode = self.controller, Mode(value)
         controller.set_target(mode, controller.target_for(mode))
-        self.slider.props(MANUAL_SLIDER[mode])
+        self.slider.props.update(MANUAL_SLIDER[mode])
         self.slider.value = controller.target_for(mode)
 
     def set_manual_value(self, value: float) -> None:
