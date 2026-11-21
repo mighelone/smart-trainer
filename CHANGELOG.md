@@ -10,6 +10,11 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Fixed
+- Dragging the manual slider after switching to **Fixed ERG** or **Slope** no longer freezes the
+  ride page. The slider also opens with the right range when the page loads while Fixed ERG or
+  Slope is active.
+
 ## [0.4.0] - 2026-11-20
 
 ### Added

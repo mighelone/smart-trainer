@@ -338,6 +338,35 @@ async def test_manual_control_sets_the_trainer_target(user: User, engine):
     assert engine.controller.target_for(Mode.SLOPE) == 4.5
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (Mode.ERG, {"min": 50, "max": 600, "step": 5}),
+        (Mode.SLOPE, {"min": -10, "max": 20, "step": 0.5}),
+        (Mode.RESISTANCE, {"min": 0, "max": 100, "step": 1}),
+    ],
+)
+async def test_manual_slider_range_is_numeric_for_each_mode(user: User, engine, mode, expected):
+    # Quasar computes `min + ratio * (max - min)` while dragging: a string min turns that
+    # into string concatenation and the slider throws, freezing the page mid-drag
+    await user.open("/")
+    toggle = user.find(marker="manual-mode").elements.pop()
+    slider = user.find(marker="manual-slider").elements.pop()
+    assert isinstance(toggle, ui.toggle) and isinstance(slider, ui.slider)
+    toggle.value = "slope" if mode == Mode.RESISTANCE else mode.value  # force a real change
+    toggle.value = mode.value
+    assert {key: slider.props[key] for key in expected} == expected
+    assert all(isinstance(slider.props[key], (int, float)) for key in expected)
+
+
+async def test_manual_slider_opens_with_the_range_of_the_current_mode(user: User, engine):
+    engine.controller.set_target(Mode.ERG, 200)
+    await user.open("/")
+    slider = user.find(marker="manual-slider").elements.pop()
+    assert isinstance(slider, ui.slider)
+    assert (slider.props["min"], slider.props["max"], slider.value) == (50, 600, 200)
+
+
 async def test_settings_save_updates_profile_and_power_matching(user: User, engine, pages):
     settings = engine.settings
     settings.sync_profile = False
