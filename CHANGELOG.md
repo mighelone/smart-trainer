@@ -10,6 +10,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-21
+
 ### Fixed
 - Dragging the manual slider after switching to **Fixed ERG** or **Slope** no longer freezes the
   ride page. The slider also opens with the right range when the page loads while Fixed ERG or
@@ -128,8 +130,9 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 - Mac app (Apple Silicon) as a DMG, built and attached to GitHub Releases by the release workflow.
 - Installation guide ([INSTALL.md](INSTALL.md)).
 
-[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/mighelone/smart-trainer/compare/v0.4.1...HEAD
 [0.1.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.1.0
 [0.2.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.2.0
 [0.3.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.3.0
 [0.4.0]: https://github.com/mighelone/smart-trainer/releases/tag/v0.4.0
+[0.4.1]: https://github.com/mighelone/smart-trainer/releases/tag/v0.4.1
