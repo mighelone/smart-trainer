@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Smart Trainer app icon. Edit this file, then run packaging/build_icon.sh to regenerate
+       icon.icns. The tile follows the macOS icon grid: an 824 px rounded square on a 1024 canvas. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a2f3d"/>
+      <stop offset="1" stop-color="#11141b"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <!-- the dial: one arc per power zone, Z1 (left) to Z5 (right), in the ride screen colours
+       (ZONE_COLORS in smart_trainer/ui/widgets/tiles.py) -->
+  <g fill="none" stroke-width="64">
+    <path d="M242.0 600.0 A270 270 0 0 1 283.0 456.9" stroke="#94a3b8"/>
+    <path d="M296.4 437.5 A270 270 0 0 1 415.2 347.9" stroke="#3b82f6"/>
+    <path d="M437.6 340.5 A270 270 0 0 1 586.4 340.5" stroke="#22c55e"/>
+    <path d="M608.8 347.9 A270 270 0 0 1 727.6 437.5" stroke="#eab308"/>
+    <path d="M741.0 456.9 A270 270 0 0 1 782.0 600.0" stroke="#f97316"/>
+  </g>
+  <path d="M512 600 L635.1 442.4" stroke="#fff" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="512" cy="600" r="52" fill="#fff"/>
+  <rect x="352" y="720" width="320" height="44" rx="22" fill="#fff" opacity="0.22"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+</svg>

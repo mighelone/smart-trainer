@@ -9,5 +9,7 @@ __pycache__/
 # packaging
 build/
 dist/
+# generated from icon.svg by packaging/build_icon.sh
+packaging/icon.icns
 .coverage
 .vscode

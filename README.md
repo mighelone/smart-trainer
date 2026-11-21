@@ -23,7 +23,8 @@ The version comes from [CHANGELOG.md](CHANGELOG.md): rename `## [Unreleased]` to
 `## [X.Y.Z] - YYYY-MM-DD`, commit, then push a matching tag `vX.Y.Z` (`vX.Y.Zrc1` for a
 pre-release). The release build fails if the tag doesn't match the changelog version. `.github/workflows/release.yml` builds the Apple Silicon DMG and attaches it to
 the GitHub Release. **Actions → Release → Run workflow** builds it as a downloadable run artifact
-without releasing. To build locally: `packaging/build_macos.sh`.
+without releasing. To build locally: `packaging/build_macos.sh`. The app icon is drawn in
+`packaging/icon.svg`; the build turns it into `icon.icns` (`packaging/build_icon.sh`).
 
 Signing and notarization are optional and run only when the repository secrets `MACOS_CERT_P12`,
 `MACOS_CERT_PASSWORD`, `CODESIGN_IDENTITY`, `NOTARY_KEY`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`

@@ -12,6 +12,10 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [0.4.1] - 2026-11-21
 
+### Added
+- The Mac app and its DMG have their own icon: a power dial in the ride screen's zone colours,
+  instead of the generic Python one.
+
 ### Fixed
 - Dragging the manual slider after switching to **Fixed ERG** or **Slope** no longer freezes the
   ride page. The slider also opens with the right range when the page loads while Fixed ERG or
