@@ -10,6 +10,10 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Added
+- The Mac app and its DMG have their own icon: a power dial in the ride screen's zone colours,
+  instead of the generic Python one.
+
 ## [0.4.1] - 2026-11-21
 
 ### Fixed

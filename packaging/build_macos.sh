@@ -20,6 +20,7 @@ if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" != "v${VERSION}"
     exit 1
 fi
 
+packaging/build_icon.sh
 uv run --no-sync pyinstaller --noconfirm --clean packaging/smart_trainer.spec
 
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
