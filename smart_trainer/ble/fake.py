@@ -20,8 +20,10 @@ from smart_trainer.ble.device import (
     Device,
     DriverId,
     ProgressCallback,
+    Shifter,
     register,
 )
+from smart_trainer.ble.parsers.zwift import Button
 from smart_trainer.core.state import ConnState, Reading, Role
 
 
@@ -335,6 +337,47 @@ class FakeHeartRate(_FakeBase):
         world = self.world
         world.hr += ((60 + 0.42 * world.true_power) - world.hr) * 0.05
         self.emit(Reading(self.id, hr=round(world.hr)))
+
+
+@register
+class FakeClick(_FakeBase, Shifter):
+    """Simulated shift buttons, pressed by tests with :meth:`press` and :meth:`hold`."""
+
+    DRIVER = DriverId.FAKE_CLICK
+    ROLES = frozenset({Role.SHIFTER})
+
+    def __init__(self, address: str = "fake-click", name: str = "Fake Click", world=None):
+        """Initialize the fake controller with no button pressed.
+
+        Args:
+            address (str): Fake device address.
+            name (str): Human-readable device name.
+            world (FakeWorld | None): Simulation state; defaults to the global ``WORLD``.
+        """
+        _FakeBase.__init__(self, address, name, world)
+        Shifter.__init__(self)
+
+    def step(self) -> None:
+        """Do nothing: the controller only reports buttons, when they are pressed."""
+
+    def press(self, button: Button) -> None:
+        """Press and release a button, as the real controller reports it.
+
+        Args:
+            button (Button): The button.
+        """
+        self.hold(button, repeats=1)
+
+    def hold(self, button: Button, repeats: int) -> None:
+        """Hold a button, reported ``repeats`` times like the real controller, then release.
+
+        Args:
+            button (Button): The button.
+            repeats (int): Button state messages sent while it is held.
+        """
+        for _ in range(repeats):
+            self.update_buttons(frozenset({button}))
+        self.update_buttons(frozenset())
 
 
 def fake_devices() -> list[Device]:

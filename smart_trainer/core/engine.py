@@ -111,7 +111,10 @@ class Engine:
             settings.power_match, guard, _gearbox(settings) if settings.virtual_shifting else None
         )
         devices = DeviceHub(
-            settings, on_reading=selector.on_reading, on_change=controller.configure
+            settings,
+            on_reading=selector.on_reading,
+            on_change=controller.configure,
+            on_shift=controller.shift,
         )
 
         # Sync and calibration need to know whether a ride is active, and the ride needs

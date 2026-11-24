@@ -22,6 +22,7 @@ ROLE_ICON = {
     Role.HR: "favorite",
     Role.CADENCE: "autorenew",
     Role.SPEED: "speed",
+    Role.SHIFTER: "swap_vert",
 }
 
 

@@ -16,6 +16,7 @@ class Role(StrEnum):
     CADENCE = "cadence"
     SPEED = "speed"
     HR = "hr"
+    SHIFTER = "shifter"  # buttons that shift the virtual gears
 
 
 class ConnState(StrEnum):

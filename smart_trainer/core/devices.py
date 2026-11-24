@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Callable, Iterator, Mapping
 from typing import Protocol
 
-from smart_trainer.ble.device import Device, ReadingCallback
+from smart_trainer.ble.device import Device, ReadingCallback, ShiftCallback, Shifter
 from smart_trainer.config import PairedDevice
 from smart_trainer.core.state import Assignment, ConnState, Role
 
@@ -48,6 +48,7 @@ class DeviceHub(Mapping[str, Device]):
         config: DeviceConfig,
         on_reading: ReadingCallback,
         on_change: AssignmentListener = lambda assignment, trainer: None,
+        on_shift: ShiftCallback = lambda steps: None,
     ) -> None:
         """Initialize the hub and apply the saved role assignment.
 
@@ -57,10 +58,13 @@ class DeviceHub(Mapping[str, Device]):
             on_reading (ReadingCallback): Subscribed to every added device's readings.
             on_change (AssignmentListener): Called whenever the assignment changes
                 (including once now, with the saved assignment).
+            on_shift (ShiftCallback): Called with the shifts of the device assigned as
+                shifter; shifts of any other device are ignored.
         """
         self._config = config
         self._on_reading = on_reading
         self._on_change = on_change
+        self._on_shift = on_shift
         self._devices: dict[str, Device] = {}
         self._notify()
 
@@ -105,6 +109,8 @@ class DeviceHub(Mapping[str, Device]):
             asyncio.ensure_future(old.stop())
         self._devices[dev.id] = dev
         dev.subscribe(self._on_reading)
+        if isinstance(dev, Shifter):
+            dev.subscribe_shifts(lambda steps, device_id=dev.id: self._shifted(device_id, steps))
         for role in roles or []:
             self._config.role_assignment[role.value] = dev.id
         self._notify()
@@ -166,6 +172,19 @@ class DeviceHub(Mapping[str, Device]):
         self._config.power_source = source
         self._config.save()
         self._notify()
+
+    def _shifted(self, device_id: str, steps: int) -> None:
+        """Forward a shift if it comes from the device assigned as shifter.
+
+        Only one device shifts: of a Click v2 pair, both controllers report the button of
+        one side, and forwarding both would shift twice.
+
+        Args:
+            device_id (str): Id of the device that shifted.
+            steps (int): Gears to shift.
+        """
+        if self.assignment.get(Role.SHIFTER) == device_id:
+            self._on_shift(steps)
 
     def _notify(self) -> None:
         """Tell the listener the assignment (or the trainer device) may have changed."""

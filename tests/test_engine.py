@@ -4,8 +4,10 @@ from contextlib import asynccontextmanager
 import pytest
 
 from smart_trainer.ble import fake
+from smart_trainer.ble.parsers.zwift import Button
 from smart_trainer.config import Settings
 from smart_trainer.core.control import SPIRAL_RELEASE_SLOPE, Mode, SpiralGuard
+from smart_trainer.core.devices import DeviceHub
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.recorder import find_unfinished
 from smart_trainer.core.ride import MAX_TICK_DT_S, RideState
@@ -282,3 +284,49 @@ async def test_gears_change_what_the_fake_trainer_gets(tmp_path):
         engine.controller.shift(3)
         await _ride(engine, 3, 1_700_000_003)
         assert trainer.mode == "slope" and trainer.value > 1.0
+
+
+async def test_click_presses_shift_the_virtual_gears(tmp_path):
+    async with _engine(tmp_path) as (engine, trainer, world):
+        click = fake.FakeClick(world=world)
+        engine.devices.add(click, [Role.SHIFTER])
+        engine.set_virtual_shifting(True)
+        engine.ride.start(None)
+        engine.controller.set_target(Mode.SLOPE, 1.0)
+        await _ride(engine, 2, 1_700_000_000)
+        assert (trainer.mode, trainer.value) == ("slope", 1.0)
+        for button in (Button.PLUS, Button.PLUS, Button.MINUS):
+            click.press(button)
+        click.hold(Button.PLUS, repeats=30)  # held: one more gear, not 30
+        gearbox = engine.controller.gearbox
+        assert gearbox is not None and gearbox.gear == NEUTRAL_GEAR + 2
+        await _ride(engine, 2, 1_700_000_002)
+        assert trainer.mode == "slope" and trainer.value > 1.0
+
+
+@pytest.mark.parametrize("mode", [Mode.ERG, Mode.RESISTANCE])
+async def test_click_presses_do_nothing_outside_slope_mode(tmp_path, mode):
+    engine = Engine.from_settings(
+        Settings(auto_upload=False, virtual_shifting=True), sessions=tmp_path, run_loop=False
+    )
+    click = fake.FakeClick()
+    engine.devices.add(click, [Role.SHIFTER])
+    engine.controller.set_target(mode, engine.controller.target_for(mode))
+    click.press(Button.PLUS)
+    gearbox = engine.controller.gearbox
+    assert gearbox is not None and gearbox.gear == NEUTRAL_GEAR
+    await engine.devices.stop_all()
+
+
+async def test_only_the_assigned_shifter_shifts():
+    shifts: list[int] = []
+    settings = Settings(auto_upload=False)
+    hub = DeviceHub(settings, on_reading=lambda reading: None, on_shift=shifts.append)
+    assigned, other = fake.FakeClick("click-a"), fake.FakeClick("click-b")
+    hub.add(assigned, [Role.SHIFTER])
+    hub.add(other)
+    assigned.press(Button.PLUS)
+    other.press(Button.PLUS)  # the other controller of a pair reports the same press
+    other.press(Button.MINUS)
+    assert shifts == [1]
+    await hub.stop_all()
