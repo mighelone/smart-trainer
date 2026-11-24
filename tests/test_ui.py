@@ -550,3 +550,26 @@ async def test_settings_switch_turns_virtual_shifting_on(user: User, engine, pag
     assert engine.controller.gearbox is not None
     user.find(marker="virtual-shifting").click()  # and back off
     assert engine.controller.gearbox is None
+
+
+@pytest.mark.parametrize(
+    ("zwift_type", "note"),
+    [(0x0B, "reports both buttons: pair this one"), (0x0A, "reports only this side's button")],
+)
+async def test_scan_pairs_a_click_as_shifter(user: User, engine, monkeypatch, zwift_type, note):
+    from smart_trainer.ble import scanner
+    from smart_trainer.ble.device import DriverId
+
+    async def scan(timeout: float) -> list[scanner.Discovered]:
+        # the fake driver, so pairing doesn't reach for Bluetooth
+        return [
+            scanner.Discovered("click-1", "Zwift Click", -48, [DriverId.FAKE_CLICK], zwift_type)
+        ]
+
+    monkeypatch.setattr(scanner, "scan", scan)
+    await user.open("/devices")
+    user.find("Scan").click()
+    await user.should_see(note, retries=20)
+    user.find("Use as shifter").click()
+    assert engine.devices.assignment.get(Role.SHIFTER) == "click-1"
+    assert engine.settings.devices["click-1"].driver == DriverId.FAKE_CLICK

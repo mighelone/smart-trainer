@@ -11,6 +11,13 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 ## [Unreleased]
 
 ### Added
+- **Zwift Click v2 as a shifter:** the Click's + and − buttons shift the virtual gears (turn on
+  virtual shifting in **Settings → Ride** and ride in **Slope** mode). Scan on the **Devices**
+  page and choose **Use as shifter** on the controller marked "reports both buttons": one
+  controller of the pair forwards the other's button, so that one is all you need. The Click
+  accepts one connection at a time, so close Zwift (or any other app using it) first.
+
+### Added
 - **Virtual shifting** for a bike with a single cog (such as a Zwift Cog): in **Slope** mode,
   shift 15 virtual gears with the − and + buttons on the ride page, or the - and + keys. Gear 8
   is the gear your chain is really in, and each gear is about 10 % harder or easier. The

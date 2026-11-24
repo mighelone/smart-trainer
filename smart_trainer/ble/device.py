@@ -15,11 +15,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar
 
+from smart_trainer.ble.parsers.zwift import Button
 from smart_trainer.core.state import ConnState, Reading, Role
 
 log = logging.getLogger(__name__)
 
 ReadingCallback = Callable[[Reading], None]
+ShiftCallback = Callable[[int], None]
+"""Called with the gears to shift: ``1`` one gear harder, ``-1`` one gear easier."""
 
 
 class DriverId(StrEnum):
@@ -31,6 +34,8 @@ class DriverId(StrEnum):
     FAKE_TRAINER = "fake_trainer"
     FAKE_POWER = "fake_power"
     FAKE_HR = "fake_hr"
+    ZWIFT_CLICK = "zwift_click"
+    FAKE_CLICK = "fake_click"
 
 
 class Device(ABC):
@@ -166,6 +171,47 @@ class ControllableTrainer(ABC):
         Args:
             grade_pct (float): Road grade in percent.
         """
+
+
+class Shifter:
+    """Mixin for devices with shift buttons: turns button states into shifts.
+
+    A device calls :meth:`update_buttons` with every button state it receives. Only a
+    press shifts (a released button becoming pressed); a held button, which controllers
+    keep reporting, doesn't shift again.
+
+    Attributes:
+        SHIFT_STEPS (dict[Button, int]): Gears each button shifts.
+    """
+
+    SHIFT_STEPS: ClassVar[dict[Button, int]] = {Button.PLUS: 1, Button.MINUS: -1}
+
+    def __init__(self) -> None:
+        """Initialize with no button pressed and no subscriber."""
+        self._pressed: frozenset[Button] = frozenset()
+        self._shift_callbacks: list[ShiftCallback] = []
+
+    def subscribe_shifts(self, cb: ShiftCallback) -> None:
+        """Register a callback to receive the shifts.
+
+        Args:
+            cb (ShiftCallback): Called with the gears to shift on every press.
+        """
+        self._shift_callbacks.append(cb)
+
+    def update_buttons(self, pressed: frozenset[Button]) -> None:
+        """Take the latest button state and shift for each newly pressed button.
+
+        Args:
+            pressed (frozenset[Button]): The buttons pressed now.
+        """
+        for button in pressed - self._pressed:
+            for cb in self._shift_callbacks:
+                try:
+                    cb(self.SHIFT_STEPS[button])
+                except Exception:  # never let a consumer bug kill the BLE task
+                    log.exception("shift callback failed")
+        self._pressed = pressed
 
 
 class CalibrationKind(StrEnum):
