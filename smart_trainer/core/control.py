@@ -8,6 +8,7 @@ from enum import StrEnum
 
 from smart_trainer.ble.device import ControllableTrainer, Device
 from smart_trainer.config import PowerMatch
+from smart_trainer.core.shifting import VirtualGearbox
 from smart_trainer.core.state import Assignment, Snapshot
 
 log = logging.getLogger(__name__)
@@ -150,7 +151,9 @@ class TrainerController:
     """Holds the current mode/target and pushes changes to the trainer.
 
     In ERG mode an injected :class:`SpiralGuard` may replace the ERG command with a flat
-    road while the cadence has collapsed; the mode and the target stay as they are.
+    road while the cadence has collapsed; the mode and the target stay as they are. In slope
+    mode an injected :class:`VirtualGearbox` turns the grade into the one that makes the
+    trainer resist like that road ridden in the current virtual gear.
 
     Attributes:
         RESEND_S (float): Seconds after which an unchanged command is resent.
@@ -162,19 +165,28 @@ class TrainerController:
         matcher (PowerMatcher): Pedal power matcher.
         guard (SpiralGuard | None): Lets go of the ERG target when the cadence collapses;
             ``None`` when the spiral guard is off.
+        gearbox (VirtualGearbox | None): Virtual gears applied in slope mode; ``None`` when
+            virtual shifting is off.
         last_command (tuple[Mode, float] | None): Last command sent to the trainer.
         trainer (ControllableTrainer | None): Trainer being controlled.
     """
 
     RESEND_S = 10.0
 
-    def __init__(self, cfg: PowerMatch, guard: SpiralGuard | None = None) -> None:
+    def __init__(
+        self,
+        cfg: PowerMatch,
+        guard: SpiralGuard | None = None,
+        gearbox: VirtualGearbox | None = None,
+    ) -> None:
         """Initialize the controller.
 
         Args:
             cfg (PowerMatch): Pedal power matching parameters.
             guard (SpiralGuard | None): Spiral guard to apply in ERG mode; ``None``
                 turns it off.
+            gearbox (VirtualGearbox | None): Virtual gears to apply in slope mode; ``None``
+                turns virtual shifting off.
         """
         self.mode = Mode.RESISTANCE
         self.erg_target = 150.0
@@ -183,6 +195,7 @@ class TrainerController:
         self.use_pedals = True
         self.matcher = PowerMatcher(cfg)
         self.guard = guard
+        self.gearbox = gearbox
         self.last_command: tuple[Mode, float] | None = None
         self._last_sent_at = 0.0
         self.trainer: ControllableTrainer | None = None
@@ -217,6 +230,36 @@ class TrainerController:
             guard (SpiralGuard | None): The new guard; ``None`` turns it off.
         """
         self.guard = guard
+
+    def set_gearbox(self, gearbox: VirtualGearbox | None) -> None:
+        """Replace the virtual gearbox; a new one starts in the real gear.
+
+        Args:
+            gearbox (VirtualGearbox | None): The new gearbox; ``None`` turns virtual
+                shifting off.
+        """
+        self.gearbox = gearbox
+
+    @property
+    def shifting(self) -> bool:
+        """Whether shifting applies now: virtual shifting is on and the mode is slope.
+
+        Returns:
+            bool: ``True`` when :meth:`shift` changes the gear.
+        """
+        return self.gearbox is not None and self.mode == Mode.SLOPE
+
+    def shift(self, steps: int) -> None:
+        """Shift the virtual gear; does nothing unless :attr:`shifting`.
+
+        Gears only exist in slope mode (see :mod:`smart_trainer.core.shifting`), so a shift
+        in another mode is ignored rather than changing a gear the rider can't feel.
+
+        Args:
+            steps (int): Gears to move, e.g. ``1`` for one gear harder.
+        """
+        if self.gearbox is not None and self.shifting:
+            self.gearbox.shift(steps)
 
     def set_target(self, mode: Mode, value: float) -> None:
         """Switch to a mode and set its target.
@@ -280,6 +323,8 @@ class TrainerController:
             return Mode.ERG, target
         if self.mode == Mode.RESISTANCE:
             return Mode.RESISTANCE, self.resistance_pct
+        if self.gearbox is not None:
+            return Mode.SLOPE, self.gearbox.grade_for(self.slope_pct, snapshot.speed_kmh)
         return Mode.SLOPE, self.slope_pct
 
     def _released(self, snapshot: Snapshot, now: float | None) -> bool:

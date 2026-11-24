@@ -9,6 +9,7 @@ from smart_trainer.core.control import SPIRAL_RELEASE_SLOPE, Mode, SpiralGuard
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.recorder import find_unfinished
 from smart_trainer.core.ride import MAX_TICK_DT_S, RideState
+from smart_trainer.core.shifting import NEUTRAL_GEAR
 from smart_trainer.core.state import Role
 from smart_trainer.core.workout import Step, Workout
 
@@ -251,3 +252,33 @@ def test_spiral_guard_follows_the_setting(tmp_path, on):
     engine = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
     assert isinstance(engine.controller.guard, SpiralGuard) is on
     assert not engine.controller.erg_released
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_virtual_shifting_follows_the_setting(tmp_path, on):
+    settings = Settings(auto_upload=False, virtual_shifting=on)
+    engine = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
+    assert (engine.controller.gearbox is not None) is on
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_set_virtual_shifting_saves_and_applies(tmp_path, on):
+    settings = Settings(auto_upload=False, virtual_shifting=not on)
+    engine = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
+    engine.set_virtual_shifting(on)
+    assert Settings.load().virtual_shifting is on
+    gearbox = engine.controller.gearbox
+    assert (gearbox is not None) is on
+    assert gearbox is None or gearbox.gear == NEUTRAL_GEAR
+
+
+async def test_gears_change_what_the_fake_trainer_gets(tmp_path):
+    async with _engine(tmp_path) as (engine, trainer, world):
+        engine.set_virtual_shifting(True)
+        engine.ride.start(None)
+        engine.controller.set_target(Mode.SLOPE, 1.0)
+        await _ride(engine, 3, 1_700_000_000)
+        assert (trainer.mode, trainer.value) == ("slope", 1.0)
+        engine.controller.shift(3)
+        await _ride(engine, 3, 1_700_000_003)
+        assert trainer.mode == "slope" and trainer.value > 1.0

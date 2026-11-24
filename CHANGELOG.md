@@ -10,6 +10,15 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 
 ## [Unreleased]
 
+### Added
+- **Virtual shifting** for a bike with a single cog (such as a Zwift Cog): in **Slope** mode,
+  shift 15 virtual gears with the − and + buttons on the ride page, or the - and + keys. Gear 8
+  is the gear your chain is really in, and each gear is about 10 % harder or easier. The
+  trainer resists like the road you're riding would in that gear: at the same cadence a harder
+  gear means riding faster, so more air drag on the flat and more force on climbs. Turn it on in
+  **Settings → Ride**. It needs a speed reading from the trainer or a speed sensor to work on
+  the flat.
+
 ## [0.4.1] - 2026-11-21
 
 ### Added

@@ -11,6 +11,7 @@ from smart_trainer.core.control import (
     SpiralGuard,
     TrainerController,
 )
+from smart_trainer.core.shifting import NEUTRAL_GEAR, VirtualGearbox
 from smart_trainer.core.state import Snapshot
 
 
@@ -214,3 +215,52 @@ async def test_power_matching_restarts_clean_after_a_release(controller):
     assert not controller.erg_released
     assert controller.matcher.integral == 0.0
     assert controller.matcher.ratio == 1.05  # the learned calibration is kept
+
+
+# ------------------------------------------------------------------ virtual shifting
+@pytest.fixture
+def geared(trainer) -> TrainerController:
+    """Slope mode at 2 % with virtual shifting on, in the real gear."""
+    controller = TrainerController(PowerMatch(), gearbox=VirtualGearbox(rider_kg=lambda: 75.0))
+    controller.trainer = cast(ControllableTrainer, trainer)
+    controller.set_target(Mode.SLOPE, 2.0)
+    return controller
+
+
+async def test_slope_is_sent_for_the_virtual_gear(geared, trainer):
+    snap = Snapshot(cadence=90, power=200, speed_kmh=30.0)
+    await geared.apply(snap, connected=True, now=0.0)
+    assert _last(trainer) == ("slope", 2.0)  # real gear: the road grade itself
+    geared.shift(2)
+    await geared.apply(snap, connected=True, now=1.0)
+    expected = VirtualGearbox(rider_kg=lambda: 75.0, gear=NEUTRAL_GEAR + 2).grade_for(2.0, 30.0)
+    assert _last(trainer) == ("slope", round(expected, 1))
+    assert expected > 2.0
+
+
+@pytest.mark.parametrize(("mode", "value"), [(Mode.ERG, 220.0), (Mode.RESISTANCE, 40.0)])
+async def test_gears_only_exist_in_slope_mode(geared, trainer, mode, value):
+    geared.set_target(mode, value)
+    assert not geared.shifting
+    geared.shift(3)
+    await geared.apply(Snapshot(cadence=90, power=200, speed_kmh=30.0), connected=True, now=0.0)
+    assert _last(trainer) == (mode.value, value)
+    geared.set_target(Mode.SLOPE, 2.0)
+    assert geared.gearbox is not None and geared.gearbox.gear == NEUTRAL_GEAR
+
+
+async def test_without_a_gearbox_shifting_does_nothing(trainer):
+    controller = TrainerController(PowerMatch())
+    controller.trainer = cast(ControllableTrainer, trainer)
+    controller.set_target(Mode.SLOPE, 2.0)
+    controller.shift(2)
+    await controller.apply(Snapshot(cadence=90, speed_kmh=30.0), connected=True, now=0.0)
+    assert not controller.shifting and _last(trainer) == ("slope", 2.0)
+
+
+def test_turning_shifting_off_and_on_starts_in_the_real_gear(geared):
+    geared.shift(4)
+    geared.set_gearbox(None)
+    assert not geared.shifting
+    geared.set_gearbox(VirtualGearbox(rider_kg=lambda: 75.0))
+    assert geared.gearbox is not None and geared.gearbox.gear == NEUTRAL_GEAR

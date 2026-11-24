@@ -5,10 +5,13 @@ from __future__ import annotations
 from collections import deque
 
 from nicegui import ui
+from nicegui.events import KeyEventArguments
 
 from smart_trainer.config import Settings
 from smart_trainer.core.control import Mode
 from smart_trainer.core.ride import RideState
+from smart_trainer.core.shifting import GEAR_COUNT, VirtualGearbox
+from smart_trainer.core.state import Snapshot
 from smart_trainer.core.workout import WorkoutRunner
 from smart_trainer.ui.context import AppContext, LiveRide
 from smart_trainer.ui.pages.frame import frame
@@ -28,6 +31,25 @@ MANUAL_SLIDER = {
     Mode.SLOPE: {"min": -10, "max": 20, "step": 0.5},
     Mode.ERG: {"min": 50, "max": 600, "step": 5},
 }
+# Keys that shift a virtual gear, by key name. "=" is the unshifted "+" key on most layouts;
+# the arrow keys are left alone because a focused slider already uses them.
+SHIFT_KEYS = {"+": 1, "=": 1, "-": -1}
+
+
+def gear_text(gearbox: VirtualGearbox, grade_pct: float, speed_kmh: float | None) -> str:
+    """Describe the current gear and the grade it sends to the trainer.
+
+    Args:
+        gearbox (VirtualGearbox): The virtual gearbox.
+        grade_pct (float): Grade set with the slider, in %.
+        speed_kmh (float | None): Measured speed in km/h, ``None`` if unknown.
+
+    Returns:
+        str: E.g. ``"Gear 9/15 · 3.4 % sent"``, noting when the speed is missing.
+    """
+    sent = gearbox.grade_for(grade_pct, speed_kmh)
+    text = f"Gear {gearbox.gear}/{GEAR_COUNT} · {sent:.1f} % sent"
+    return text if speed_kmh is not None else f"{text} · no speed"
 
 
 class RidePage:
@@ -149,6 +171,7 @@ class RidePage:
                     .mark("manual-slider")
                 )
                 self.slider_label = ui.label("").classes("control-value w-24")
+                self._build_gears()
             with ui.row().classes("items-center gap-3 shrink-0"):
                 ui.label("Power source").classes("field-label")
                 ui.toggle(
@@ -157,7 +180,29 @@ class RidePage:
                     on_change=lambda ev: self.devices.set_power_source(ev.value),
                 )
 
+    def _build_gears(self) -> None:
+        """Build the virtual gear buttons and the keys that shift."""
+        with ui.row().classes("items-center gap-1 shrink-0") as self.gear_box:
+            ui.button(icon="remove", on_click=lambda: self.controller.shift(-1)).props(
+                "color=secondary round dense"
+            ).tooltip("Easier gear (-)").mark("shift-down")
+            self.gear_label = ui.label("").classes("control-value").mark("gear")
+            ui.button(icon="add", on_click=lambda: self.controller.shift(1)).props(
+                "color=secondary round dense"
+            ).tooltip("Harder gear (+)").mark("shift-up")
+        ui.keyboard(on_key=self.on_key)
+
     # ---------------------------------------------------------- handlers
+    def on_key(self, event: KeyEventArguments) -> None:
+        """Shift a virtual gear on the + and - keys.
+
+        Args:
+            event (KeyEventArguments): The key event.
+        """
+        steps = SHIFT_KEYS.get(event.key.name)
+        if steps and event.action.keydown:
+            self.controller.shift(steps)
+
     def set_manual_mode(self, value: str) -> None:
         """Switch the manual control mode and adapt the slider range.
 
@@ -243,7 +288,7 @@ class RidePage:
         self.warn.set_text(" · ".join(status))
         self.warn.set_visibility(bool(status))
         self._refresh_controls(riding, runner is not None)
-        self._refresh_manual(manual=not (runner and self.ride.erg_enabled))
+        self._refresh_manual(not (runner and self.ride.erg_enabled), snap)
         self.cues.check()
 
     def _show_workout_step(self, runner: WorkoutRunner) -> None:
@@ -296,11 +341,12 @@ class RidePage:
         self.erg.set_visibility(workout)
         self.intensity_box.set_visibility(workout)
 
-    def _refresh_manual(self, manual: bool) -> None:
+    def _refresh_manual(self, manual: bool, snap: Snapshot) -> None:
         """Update the manual control, shown unless a workout drives the trainer in ERG.
 
         Args:
             manual (bool): Whether the manual control is in use.
+            snap (Snapshot): Latest metrics (the speed the virtual gears depend on).
         """
         self.manual_box.set_visibility(manual)
         controller = self.controller
@@ -309,6 +355,10 @@ class RidePage:
         )
         if manual and self.mode.value != controller.mode.value:
             self.mode.value = controller.mode.value
+        gearbox = controller.gearbox
+        self.gear_box.set_visibility(controller.shifting)
+        if gearbox is not None and controller.shifting:
+            self.gear_label.set_text(gear_text(gearbox, controller.slope_pct, snap.speed_kmh))
 
     def refresh_chart(self) -> None:
         """Send the new live power and heart-rate points to the chart."""
