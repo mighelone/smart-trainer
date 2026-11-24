@@ -34,6 +34,7 @@ from smart_trainer.core.control import SpiralGuard, TrainerController
 from smart_trainer.core.devices import DeviceHub
 from smart_trainer.core.ride import MAX_TICK_DT_S, Ride
 from smart_trainer.core.sessions import SessionStore
+from smart_trainer.core.shifting import VirtualGearbox
 from smart_trainer.core.sources import SourceSelector
 from smart_trainer.core.state import Snapshot
 from smart_trainer.sync.service import ConnectionsFactory, SyncService
@@ -106,7 +107,9 @@ class Engine:
         messages: deque[str] = deque(maxlen=20)
         selector = SourceSelector()
         guard = SpiralGuard() if settings.erg_spiral_guard else None
-        controller = TrainerController(settings.power_match, guard)
+        controller = TrainerController(
+            settings.power_match, guard, _gearbox(settings) if settings.virtual_shifting else None
+        )
         devices = DeviceHub(
             settings, on_reading=selector.on_reading, on_change=controller.configure
         )
@@ -148,6 +151,17 @@ class Engine:
         """
         self.settings.update(erg_spiral_guard=on)
         self.controller.set_spiral_guard(SpiralGuard() if on else None)
+
+    def set_virtual_shifting(self, on: bool) -> None:
+        """Turn virtual shifting on or off: save the setting and apply it right away.
+
+        Turning it on starts in the real gear (the neutral gear).
+
+        Args:
+            on (bool): Whether virtual shifting is on.
+        """
+        self.settings.update(virtual_shifting=on)
+        self.controller.set_gearbox(_gearbox(self.settings) if on else None)
 
     # ---------------------------------------------------------------- lifecycle
     async def __aenter__(self) -> Self:
@@ -244,3 +258,15 @@ class Engine:
         if last is None:
             return self.tick_s
         return min(max(now_mono - last, 0.0), MAX_TICK_DT_S)
+
+
+def _gearbox(settings: Settings) -> VirtualGearbox:
+    """A virtual gearbox in the real gear that reads the rider's weight from the settings.
+
+    Args:
+        settings (Settings): User settings (rider weight).
+
+    Returns:
+        VirtualGearbox: The new gearbox.
+    """
+    return VirtualGearbox(rider_kg=lambda: settings.weight_kg)

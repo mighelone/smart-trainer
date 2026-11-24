@@ -71,6 +71,7 @@ class SettingsPage:
         messages: deque[str],
         settings: Settings,
         set_spiral_guard: Callable[[bool], None],
+        set_virtual_shifting: Callable[[bool], None],
         forms: Mapping[str, FormFactory],
     ) -> None:
         """Build the page.
@@ -81,11 +82,14 @@ class SettingsPage:
             settings (Settings): User settings.
             set_spiral_guard (Callable[[bool], None]): Turns the ERG spiral guard on or off
                 (saves the setting and applies it to the trainer control).
+            set_virtual_shifting (Callable[[bool], None]): Turns virtual shifting on or off
+                (saves the setting and applies it to the trainer control).
             forms (Mapping[str, FormFactory]): Each connection's own settings form, by id.
         """
         self.sync_service = sync
         self.messages = messages
         self._set_spiral_guard = set_spiral_guard
+        self._set_virtual_shifting = set_virtual_shifting
         self.forms = forms
         self.st = settings
         with (
@@ -132,7 +136,7 @@ class SettingsPage:
         ).mark("save-settings")
 
     def _build_ride(self) -> None:
-        """Build the ride section: interval cues and the ERG spiral guard."""
+        """Build the ride section: interval cues, the ERG spiral guard, virtual shifting."""
         ui.label("Ride").classes("section-title mt-2")
         with ui.row().classes("items-center gap-2"):
             self.cues = ui.switch(
@@ -151,6 +155,14 @@ class SettingsPage:
         ).mark("erg-spiral-guard").tooltip(
             "Avoids grinding to a halt: the trainer goes to a flat road until you spin "
             f"back up to {SPIRAL_RESUME_RPM} rpm, then the target comes back"
+        )
+        ui.switch(
+            "Virtual shifting in Slope mode",
+            value=self.st.virtual_shifting,
+            on_change=lambda ev: self._set_virtual_shifting(bool(ev.value)),
+        ).mark("virtual-shifting").tooltip(
+            "For a bike with a single cog: shift virtual gears with the − and + buttons on the "
+            "ride page (or the - and + keys), and the trainer resists like the road in that gear"
         )
 
     def _build_connections(self) -> None:

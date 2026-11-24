@@ -92,6 +92,8 @@ class Settings(BaseModel):
         interval_cues (bool): Beep and show the next step shortly before each step change.
         erg_spiral_guard (bool): In ERG mode, let go of the trainer when the cadence
             collapses, and take the target back once spinning again.
+        virtual_shifting (bool): In slope mode, shift virtual gears (for a bike with a
+            single cog): the trainer resists like the road ridden in the chosen gear.
         connections (dict[str, ConnectionSettings]): Settings of each connection by id.
         power_zones (list[int]): Power zone upper bounds as % of FTP (last is open-ended).
         power_zone_names (list[str]): Power zone names.
@@ -111,6 +113,7 @@ class Settings(BaseModel):
     sync_profile: bool = True
     interval_cues: bool = True
     erg_spiral_guard: bool = True
+    virtual_shifting: bool = False
     power_zones: list[int] = Field(default_factory=lambda: list(DEFAULT_POWER_ZONES))
     power_zone_names: list[str] = Field(default_factory=list)
     hr_zones: list[int] = Field(default_factory=list)

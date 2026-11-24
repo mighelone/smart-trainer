@@ -152,13 +152,20 @@ def cmd_set_target_resistance(level_pct: float) -> bytes:
     return struct.pack("<BB", FtmsOp.SET_TARGET_RESISTANCE, round(level * 2) & 0xFF)
 
 
+# Road the trainer simulates in slope mode. The trainer resists with
+# F = m·g·(crr + grade) + cw·(v + wind)², with m its own rider mass (FTMS can't send one).
+SIM_CRR = 0.004  # rolling resistance coefficient, dimensionless (a road tyre on asphalt)
+SIM_CW = 0.51  # wind resistance coefficient in kg/m: 0.5·ρ·CdA for a rider on the hoods
+SIM_MAX_GRADE_PCT = 20.0  # steepest grade sent, in % (either direction)
+
+
 def cmd_set_simulation(
-    grade_pct: float, wind_mps: float = 0.0, crr: float = 0.004, cw: float = 0.51
+    grade_pct: float, wind_mps: float = 0.0, crr: float = SIM_CRR, cw: float = SIM_CW
 ) -> bytes:
     """Build the FTMS *Set Indoor Bike Simulation Parameters* command.
 
     Args:
-        grade_pct (float): Road grade in percent, clamped to ±20.
+        grade_pct (float): Road grade in percent, clamped to ±``SIM_MAX_GRADE_PCT``.
         wind_mps (float): Wind speed in m/s.
         crr (float): Rolling resistance coefficient.
         cw (float): Wind resistance coefficient in kg/m.
@@ -166,7 +173,7 @@ def cmd_set_simulation(
     Returns:
         bytes: Encoded control point command.
     """
-    grade_pct = max(-20.0, min(grade_pct, 20.0))
+    grade_pct = max(-SIM_MAX_GRADE_PCT, min(grade_pct, SIM_MAX_GRADE_PCT))
     return struct.pack(
         "<BhhBB",
         FtmsOp.SET_SIMULATION,

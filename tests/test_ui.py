@@ -491,3 +491,62 @@ async def test_workout_preview_chart_is_compact(user: User, engine):
     for chart in previews:
         assert [s["name"] for s in chart.options["series"]] == ["Target"]
         assert len(chart.options["yAxis"]) == 1
+
+
+async def test_gear_buttons_shift_in_slope_mode(user: User, engine):
+    engine.set_virtual_shifting(True)
+    engine.controller.set_target(Mode.SLOPE, 2.0)
+    await user.open("/")
+    await user.should_see(marker="gear", retries=20)
+    await user.should_see("Gear 8/15", retries=20)
+    user.find(marker="shift-up").click()
+    user.find(marker="shift-up").click()
+    assert engine.controller.gearbox is not None and engine.controller.gearbox.gear == 10
+    await user.should_see("Gear 10/15", retries=20)
+    user.find(marker="shift-down").click()
+    await user.should_see("Gear 9/15", retries=20)
+
+
+@pytest.mark.parametrize("mode", [Mode.RESISTANCE, Mode.ERG])
+async def test_gear_buttons_are_hidden_outside_slope_mode(user: User, engine, mode):
+    engine.set_virtual_shifting(True)
+    engine.controller.set_target(mode, engine.controller.target_for(mode))
+    await user.open("/")
+    await asyncio.sleep(0.6)  # let the refresh timer run
+    await user.should_not_see(marker="shift-up")
+
+
+@pytest.mark.parametrize(("keys", "gear"), [("+", 9), ("=", 9), ("-", 7), ("++-", 9), ("x", 8)])
+async def test_keys_shift_gears(user: User, engine, keys, gear):
+    engine.set_virtual_shifting(True)
+    engine.controller.set_target(Mode.SLOPE, 2.0)
+    await user.open("/")
+    keyboard = user.find(ui.keyboard)
+    for key in keys:
+        for action in ("keydown", "keyup"):  # one press: only keydown shifts
+            keyboard.trigger("key", _key_event(key, action))
+    assert engine.controller.gearbox is not None and engine.controller.gearbox.gear == gear
+
+
+def _key_event(key: str, action: str) -> dict:
+    """The arguments ``ui.keyboard`` gets from the browser for a key event."""
+    return {
+        "action": action,
+        "repeat": False,
+        "key": key,
+        "code": "",
+        "location": 0,
+        "altKey": False,
+        "ctrlKey": False,
+        "metaKey": False,
+        "shiftKey": False,
+    }
+
+
+async def test_settings_switch_turns_virtual_shifting_on(user: User, engine, pages):
+    await user.open("/settings")
+    user.find(marker="virtual-shifting").click()
+    assert engine.settings.model_dump()["virtual_shifting"] is True
+    assert engine.controller.gearbox is not None
+    user.find(marker="virtual-shifting").click()  # and back off
+    assert engine.controller.gearbox is None

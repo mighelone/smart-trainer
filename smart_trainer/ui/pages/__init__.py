@@ -77,4 +77,11 @@ def _register_setup_pages(ctx: AppContext) -> None:
     def settings_page() -> None:
         """Settings page: rider profile, connections and power matching."""
         frame(ctx, "Settings")
-        SettingsPage(engine.sync, engine.messages, ctx.settings, engine.set_spiral_guard, forms)
+        SettingsPage(
+            engine.sync,
+            engine.messages,
+            ctx.settings,
+            engine.set_spiral_guard,
+            engine.set_virtual_shifting,
+            forms,
+        )
