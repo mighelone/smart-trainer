@@ -16,8 +16,9 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   page and choose **Use as shifter** on the controller marked "reports both buttons": one
   controller of the pair forwards the other's button, so that one is all you need. The Click
   accepts one connection at a time, so close Zwift (or any other app using it) first.
-
-### Added
+- In **Resistance** mode (a free ride, or a workout with ERG off), the Click's + and − make the
+  trainer 5 % harder or easier, with or without virtual shifting. The − and + buttons on the
+  ride page and the - and + keys do the same, and the slider follows.
 - **Virtual shifting** for a bike with a single cog (such as a Zwift Cog): in **Slope** mode,
   shift 15 virtual gears with the − and + buttons on the ride page, or the - and + keys. Gear 8
   is the gear your chain is really in, and each gear is about 10 % harder or easier. The

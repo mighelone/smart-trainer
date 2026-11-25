@@ -5,6 +5,7 @@ import pytest
 from smart_trainer.ble.device import ControllableTrainer
 from smart_trainer.config import PowerMatch
 from smart_trainer.core.control import (
+    RESISTANCE_STEP_PCT,
     SPIRAL_RELEASE_SLOPE,
     Mode,
     PowerMatcher,
@@ -238,15 +239,38 @@ async def test_slope_is_sent_for_the_virtual_gear(geared, trainer):
     assert expected > 2.0
 
 
-@pytest.mark.parametrize(("mode", "value"), [(Mode.ERG, 220.0), (Mode.RESISTANCE, 40.0)])
-async def test_gears_only_exist_in_slope_mode(geared, trainer, mode, value):
-    geared.set_target(mode, value)
+async def test_erg_ignores_shifts(geared, trainer):
+    geared.set_target(Mode.ERG, 220.0)
     assert not geared.shifting
     geared.shift(3)
     await geared.apply(Snapshot(cadence=90, power=200, speed_kmh=30.0), connected=True, now=0.0)
-    assert _last(trainer) == (mode.value, value)
+    assert _last(trainer) == ("erg", 220.0)
     geared.set_target(Mode.SLOPE, 2.0)
     assert geared.gearbox is not None and geared.gearbox.gear == NEUTRAL_GEAR
+
+
+@pytest.mark.parametrize(
+    ("start", "steps", "expected"),
+    [
+        (25.0, [1], 30.0),
+        (25.0, [-1, -1], 15.0),
+        (23.0, [1], 28.0),
+        (98.0, [1], 100.0),
+        (3.0, [-1], 0.0),
+        (0.0, [-1, 1], RESISTANCE_STEP_PCT),
+    ],
+)
+@pytest.mark.parametrize("gearbox", [None, VirtualGearbox(rider_kg=lambda: 75.0)])
+async def test_shifting_steps_the_resistance(trainer, gearbox, start, steps, expected):
+    controller = TrainerController(PowerMatch(), gearbox=gearbox)
+    controller.trainer = cast(ControllableTrainer, trainer)
+    controller.set_target(Mode.RESISTANCE, start)
+    assert controller.shifting
+    for step in steps:
+        controller.shift(step)
+    await controller.apply(Snapshot(cadence=90, power=200), connected=True, now=0.0)
+    assert _last(trainer) == ("resistance", expected)
+    assert gearbox is None or gearbox.gear == NEUTRAL_GEAR
 
 
 async def test_without_a_gearbox_shifting_does_nothing(trainer):

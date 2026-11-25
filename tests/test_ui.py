@@ -507,13 +507,32 @@ async def test_gear_buttons_shift_in_slope_mode(user: User, engine):
     await user.should_see("Gear 9/15", retries=20)
 
 
-@pytest.mark.parametrize("mode", [Mode.RESISTANCE, Mode.ERG])
-async def test_gear_buttons_are_hidden_outside_slope_mode(user: User, engine, mode):
+async def test_shift_buttons_are_hidden_in_erg_mode(user: User, engine):
     engine.set_virtual_shifting(True)
-    engine.controller.set_target(mode, engine.controller.target_for(mode))
+    engine.controller.set_target(Mode.ERG, 200.0)
     await user.open("/")
     await asyncio.sleep(0.6)  # let the refresh timer run
     await user.should_not_see(marker="shift-up")
+
+
+@pytest.mark.parametrize("virtual_shifting", [False, True])
+async def test_shift_buttons_step_the_resistance(user: User, engine, virtual_shifting):
+    engine.set_virtual_shifting(virtual_shifting)
+    engine.controller.set_target(Mode.RESISTANCE, 25.0)
+    await user.open("/")
+    await user.should_see(marker="shift-up", retries=20)
+    user.find(marker="shift-up").click()
+    await user.should_see("30%", retries=20)
+    await user.should_not_see(marker="gear")
+    engine.controller.shift(-2)  # as a Click press does, outside the page
+    await user.should_see("20%", retries=20)
+    slider = user.find(marker="manual-slider").elements.pop()
+    assert isinstance(slider, ui.slider)
+    for _ in range(20):
+        if slider.value == 20:
+            break
+        await asyncio.sleep(0.1)
+    assert slider.value == 20 and engine.controller.target_for(Mode.RESISTANCE) == 20
 
 
 @pytest.mark.parametrize(("keys", "gear"), [("+", 9), ("=", 9), ("-", 7), ("++-", 9), ("x", 8)])

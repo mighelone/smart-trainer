@@ -304,18 +304,33 @@ async def test_click_presses_shift_the_virtual_gears(tmp_path):
         assert trainer.mode == "slope" and trainer.value > 1.0
 
 
-@pytest.mark.parametrize("mode", [Mode.ERG, Mode.RESISTANCE])
-async def test_click_presses_do_nothing_outside_slope_mode(tmp_path, mode):
+async def test_click_presses_do_nothing_in_erg_mode(tmp_path):
     engine = Engine.from_settings(
         Settings(auto_upload=False, virtual_shifting=True), sessions=tmp_path, run_loop=False
     )
     click = fake.FakeClick()
     engine.devices.add(click, [Role.SHIFTER])
-    engine.controller.set_target(mode, engine.controller.target_for(mode))
+    engine.controller.set_target(Mode.ERG, 200.0)
     click.press(Button.PLUS)
     gearbox = engine.controller.gearbox
     assert gearbox is not None and gearbox.gear == NEUTRAL_GEAR
+    assert engine.controller.target_for(Mode.ERG) == 200.0
     await engine.devices.stop_all()
+
+
+async def test_click_presses_step_the_resistance(tmp_path):
+    async with _engine(tmp_path) as (engine, trainer, world):
+        click = fake.FakeClick(world=world)
+        engine.devices.add(click, [Role.SHIFTER])
+        engine.ride.start(None)
+        engine.controller.set_target(Mode.RESISTANCE, 25.0)
+        await _ride(engine, 2, 1_700_000_000)
+        assert (trainer.mode, trainer.value) == ("resistance", 25.0)
+        for button in (Button.PLUS, Button.PLUS, Button.MINUS):
+            click.press(button)
+        click.hold(Button.PLUS, repeats=30)  # held: one more step, not 30
+        await _ride(engine, 2, 1_700_000_002)
+        assert (trainer.mode, trainer.value) == ("resistance", 35.0)
 
 
 async def test_only_the_assigned_shifter_shifts():
