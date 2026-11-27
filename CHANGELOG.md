@@ -27,6 +27,11 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   **Settings → Ride**. It needs a speed reading from the trainer or a speed sensor to work on
   the flat.
 
+### Fixed
+- Info messages now reach the log: devices connecting and disconnecting, the Zwift Click
+  handshake, profile sync. Until now only warnings were shown in the terminal, and the desktop
+  app's log file (`logs/smart-trainer.log`) stayed empty.
+
 ## [0.4.1] - 2026-11-21
 
 ### Added

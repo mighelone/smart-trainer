@@ -10,6 +10,9 @@ from smart_trainer import config
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 LOG_MAX_BYTES = 1_000_000  # rotate the log file at ~1 MB
 LOG_BACKUPS = 5  # keep smart-trainer.log.1 … .5
+# force=True: fit_tool calls logging.basicConfig when it's imported (fit_tool/utils/logging.py),
+# leaving the root logger with a WARNING-level handler; without force our basicConfig would
+# then do nothing and every info message (devices connecting, sync) would be dropped.
 
 
 def log_path() -> Path:
@@ -24,6 +27,8 @@ def log_path() -> Path:
 def setup_logging(to_file: bool, level: int = logging.INFO) -> Path | None:
     """Log either to a size-rotated file in the app directory or to the console.
 
+    Replaces any logging set up before, by the app or by a library.
+
     Args:
         to_file (bool): Write to the rotating log file (e.g. in the native app, which
             has no console) instead of the console (stderr).
@@ -33,7 +38,7 @@ def setup_logging(to_file: bool, level: int = logging.INFO) -> Path | None:
         Path | None: The log file path, or ``None`` when logging to the console.
     """
     if not to_file:
-        logging.basicConfig(level=level, format=LOG_FORMAT)
+        logging.basicConfig(level=level, format=LOG_FORMAT, force=True)
         return None
     from logging.handlers import RotatingFileHandler
 
@@ -43,5 +48,5 @@ def setup_logging(to_file: bool, level: int = logging.INFO) -> Path | None:
         path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
     )
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    logging.basicConfig(level=level, handlers=[file_handler])
+    logging.basicConfig(level=level, handlers=[file_handler], force=True)
     return path
