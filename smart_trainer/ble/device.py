@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar
@@ -37,6 +37,7 @@ class DriverId(StrEnum):
     ZWIFT_CLICK = "zwift_click"
     ZWIFT_CLICK_RIGHT = "zwift_click_right"
     FAKE_CLICK = "fake_click"
+    OPEN_BIKE_CONTROL = "open_bike_control"
 
 
 class Device(ABC):
@@ -179,17 +180,22 @@ class Shifter:
 
     A device calls :meth:`update_buttons` with every button state it receives. Only a
     press shifts (a released button becoming pressed); a held button, which controllers
-    keep reporting, doesn't shift again.
+    keep reporting, doesn't shift again. Buttons are whatever the device's protocol names
+    them; those missing from :attr:`SHIFT_STEPS` don't shift.
 
     Attributes:
-        SHIFT_STEPS (dict[Button, int]): Steps each button shifts: harder (+) or easier.
+        SHIFT_STEPS (Mapping[Hashable, int]): Steps each button shifts: harder (+) or easier.
     """
 
-    SHIFT_STEPS: ClassVar[dict[Button, int]] = {Button.PLUS: 1, Button.MINUS: -1, Button.B: -1}
+    SHIFT_STEPS: ClassVar[Mapping[Hashable, int]] = {
+        Button.PLUS: 1,
+        Button.MINUS: -1,
+        Button.B: -1,
+    }
 
     def __init__(self) -> None:
         """Initialize with no button pressed and no subscriber."""
-        self._pressed: frozenset[Button] = frozenset()
+        self._pressed: frozenset[Hashable] = frozenset()
         self._shift_callbacks: list[ShiftCallback] = []
 
     def subscribe_shifts(self, cb: ShiftCallback) -> None:
@@ -213,13 +219,15 @@ class Shifter:
         """Forget the buttons pressed, e.g. on a new connection, so the next press shifts."""
         self._pressed = frozenset()
 
-    def update_buttons(self, pressed: frozenset[Button]) -> None:
+    def update_buttons(self, pressed: frozenset[Hashable]) -> None:
         """Take the latest button state and shift for each newly pressed button.
 
         Args:
-            pressed (frozenset[Button]): The buttons pressed now.
+            pressed (frozenset[Hashable]): The buttons pressed now.
         """
         for button in pressed - self._pressed:
+            if button not in self.SHIFT_STEPS:
+                continue
             for cb in self._shift_callbacks:
                 try:
                     cb(self.SHIFT_STEPS[button])

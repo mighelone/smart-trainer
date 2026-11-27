@@ -11,6 +11,14 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 ## [Unreleased]
 
 ### Added
+- **BikeControl as a shifter:** shift with any controller that
+  [BikeControl](https://openbikecontrol.org/) supports (Zwift Click, Ride, Play and others).
+  BikeControl relays its buttons over the local network with OpenBikeControl. Connect
+  BikeControl with OpenBikeControl over the network, scan on the **Devices** page, and choose
+  **Use as shifter** on the device marked "network". BikeControl's Shift Up makes the trainer
+  harder and Shift Down easier, just like the Click's buttons. If BikeControl has no controller
+  connected, the ride screen says so. BikeControl can run on the same Mac or on another device on
+  the same network.
 - **Zwift Click v2 as a shifter:** the Click's + and − buttons shift the virtual gears (turn on
   virtual shifting in **Settings → Ride** and ride in **Slope** mode). Scan on the **Devices**
   page and choose **Use as shifter** on one of its controllers (see below for which). The

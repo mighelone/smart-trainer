@@ -619,3 +619,30 @@ async def test_scan_pairs_a_click_as_shifter(user: User, engine, monkeypatch, zw
     user.find("Use as shifter").click()
     assert engine.devices.assignment.get(Role.SHIFTER) == "click-1"
     assert engine.settings.devices["click-1"].driver == DriverId.FAKE_CLICK
+
+
+async def test_scan_lists_bikecontrol_on_the_network_next_to_bluetooth(
+    user: User, engine, monkeypatch
+):
+    from smart_trainer.ble import scanner
+    from smart_trainer.ble.device import DriverId
+    from smart_trainer.obc import discovery
+
+    async def scan(timeout: float) -> list[scanner.Discovered]:
+        raise OSError("Bluetooth is off")
+
+    async def browse(timeout: float) -> list[scanner.Discovered]:
+        # the fake driver, so pairing doesn't reach for the network
+        return [
+            scanner.Discovered(
+                "bc._openbikecontrol._tcp.local.", "BikeControl", None, [DriverId.FAKE_CLICK]
+            )
+        ]
+
+    monkeypatch.setattr(scanner, "scan", scan)
+    monkeypatch.setattr(discovery, "browse", browse)
+    await user.open("/devices")
+    user.find("Scan").click()
+    await user.should_see("shifter · network", retries=20)
+    user.find("Use as shifter").click()
+    assert engine.devices.assignment.get(Role.SHIFTER) == "bc._openbikecontrol._tcp.local."

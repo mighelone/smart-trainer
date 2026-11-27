@@ -1,4 +1,4 @@
-"""Shared fixtures: every test runs with its own app folder and an in-memory keyring."""
+"""Shared fixtures: every test runs with its own app folder, an in-memory keyring and no mDNS."""
 
 import os
 
@@ -9,6 +9,7 @@ from keyring.errors import PasswordDeleteError
 
 from smart_trainer import config
 from smart_trainer.config import Settings
+from smart_trainer.obc import discovery
 
 
 class MemoryKeyring(KeyringBackend):
@@ -31,6 +32,11 @@ class MemoryKeyring(KeyringBackend):
             raise PasswordDeleteError(username)
 
 
+async def _no_network_devices(timeout: float = 6.0) -> list:
+    """Stand in for the network scan: nothing is found."""
+    return []
+
+
 @pytest.fixture(autouse=True)
 def isolated_app(tmp_path):
     """Keep config, sessions, logs and secrets of every test away from the user's own."""
@@ -40,6 +46,7 @@ def isolated_app(tmp_path):
         patch.setattr(config, "APP_DIR", tmp_path / "app")
         for name in [n for n in os.environ if n.startswith(("SMART_TRAINER_", "INTERVALS_"))]:
             patch.delenv(name)  # secrets can come from the environment too
+        patch.setattr(discovery, "browse", _no_network_devices)  # a scan never browses the LAN
         previous = keyring.get_keyring()
         keyring.set_keyring(MemoryKeyring())
         yield
