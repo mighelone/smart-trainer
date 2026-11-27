@@ -1,4 +1,4 @@
-"""Bluetooth UUIDs used by the app: standard SIG ones, plus Zwift's own."""
+"""Bluetooth UUIDs used by the app: the standard SIG ones."""
 
 
 def sig(short: int) -> str:
@@ -18,7 +18,6 @@ FTMS_SERVICE = sig(0x1826)
 CYCLING_POWER_SERVICE = sig(0x1818)
 HEART_RATE_SERVICE = sig(0x180D)
 CSC_SERVICE = sig(0x1816)
-ZWIFT_SERVICE = sig(0xFC82)  # Zwift controllers (Click v2, Ride) with current firmware
 
 # Characteristics
 INDOOR_BIKE_DATA = sig(0x2AD2)
@@ -30,7 +29,3 @@ CYCLING_POWER_FEATURE = sig(0x2A65)
 CYCLING_POWER_CONTROL_POINT = sig(0x2A66)
 HEART_RATE_MEASUREMENT = sig(0x2A37)
 CSC_MEASUREMENT = sig(0x2A5B)
-# Zwift controller characteristics (not documented by Zwift; see ble/parsers/zwift.py)
-ZWIFT_ASYNC = "00000002-19ca-4651-86e5-fa29dcdd09d1"  # notify: button and status messages
-ZWIFT_SYNC_RX = "00000003-19ca-4651-86e5-fa29dcdd09d1"  # write: the "RideOn" handshake
-ZWIFT_SYNC_TX = "00000004-19ca-4651-86e5-fa29dcdd09d1"  # indicate: the handshake reply

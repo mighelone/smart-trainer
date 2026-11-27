@@ -23,9 +23,9 @@ from smart_trainer.ble.device import (
     Shifter,
     register,
 )
-from smart_trainer.ble.parsers.zwift import Button
-from smart_trainer.ble.zwift_click import LOCKED
 from smart_trainer.core.state import ConnState, Reading, Role
+from smart_trainer.obc.device import NO_CONTROLLER, OpenBikeControl
+from smart_trainer.obc.protocol import ObcButton
 
 
 class FakeWorld:
@@ -341,17 +341,19 @@ class FakeHeartRate(_FakeBase):
 
 
 @register
-class FakeClick(_FakeBase, Shifter):
-    """Simulated shift buttons, pressed by tests with :meth:`press` and :meth:`hold`.
+class FakeShifter(_FakeBase, Shifter):
+    """Simulated shift buttons, relayed like BikeControl does; tests press them.
 
-    :meth:`lock` simulates a controller that Zwift has locked, as :attr:`problem` reports.
+    :meth:`lose_controller` simulates BikeControl reporting that no controller is connected,
+    as :attr:`problem` then says.
     """
 
-    DRIVER = DriverId.FAKE_CLICK
+    DRIVER = DriverId.FAKE_SHIFTER
     ROLES = frozenset({Role.SHIFTER})
+    SHIFT_STEPS = OpenBikeControl.SHIFT_STEPS
 
-    def __init__(self, address: str = "fake-click", name: str = "Fake Click", world=None):
-        """Initialize the fake controller with no button pressed.
+    def __init__(self, address: str = "fake-shifter", name: str = "Fake Shifter", world=None):
+        """Initialize the fake shifter with no button pressed and a controller connected.
 
         Args:
             address (str): Fake device address.
@@ -360,40 +362,40 @@ class FakeClick(_FakeBase, Shifter):
         """
         _FakeBase.__init__(self, address, name, world)
         Shifter.__init__(self)
-        self._locked = False
+        self._controller = True
 
     @property
     def problem(self) -> str | None:
-        """Why the buttons don't work: set by :meth:`lock`, cleared by a press.
+        """Why the buttons don't work: set by :meth:`lose_controller`, cleared by a press.
 
         Returns:
             str | None: The message for the rider, or ``None``.
         """
-        return LOCKED if self._locked else None
+        return None if self._controller else NO_CONTROLLER
 
-    def lock(self) -> None:
-        """Behave like a controller locked by Zwift: it asks for an unlock."""
-        self._locked = True
+    def lose_controller(self) -> None:
+        """Behave like BikeControl when its controller disconnects."""
+        self._controller = False
 
     def step(self) -> None:
-        """Do nothing: the controller only reports buttons, when they are pressed."""
+        """Do nothing: the shifter only reports buttons, when they are pressed."""
 
-    def press(self, button: Button) -> None:
-        """Press and release a button, as the real controller reports it.
+    def press(self, button: ObcButton) -> None:
+        """Press and release a button.
 
         Args:
-            button (Button): The button.
+            button (ObcButton): The button.
         """
         self.hold(button, repeats=1)
 
-    def hold(self, button: Button, repeats: int) -> None:
-        """Hold a button, reported ``repeats`` times like the real controller, then release.
+    def hold(self, button: ObcButton, repeats: int) -> None:
+        """Report a button pressed ``repeats`` times in a row, then released.
 
         Args:
-            button (Button): The button.
+            button (ObcButton): The button.
             repeats (int): Button state messages sent while it is held.
         """
-        self._locked = False  # it sends buttons, as the real one does once unlocked
+        self._controller = True  # buttons come only from a connected controller
         for _ in range(repeats):
             self.update_buttons(frozenset({button}))
         self.update_buttons(frozenset())

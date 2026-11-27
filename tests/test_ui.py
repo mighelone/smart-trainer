@@ -8,7 +8,6 @@ from nicegui import app, ui
 from nicegui.testing import User
 
 from smart_trainer.ble import fake
-from smart_trainer.ble.parsers.zwift import Button
 from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
@@ -302,17 +301,18 @@ async def test_cadence_alert_on_ride_and_mini(user: User, engine, pages):
     await user.should_see("Cadence high:", retries=20)  # replaces the step line
 
 
-async def test_ride_status_says_when_the_click_is_locked(user: User, engine, pages):
-    from smart_trainer.ble.zwift_click import LOCKED
+async def test_ride_status_says_when_bikecontrol_has_no_controller(user: User, engine, pages):
+    from smart_trainer.obc.device import NO_CONTROLLER
+    from smart_trainer.obc.protocol import ObcButton
 
-    click = fake.FakeClick()
-    engine.devices.add(click, [Role.SHIFTER])
-    click.lock()
-    assert LOCKED in ride_status(LiveRide.of(engine))
+    shifter = fake.FakeShifter()
+    engine.devices.add(shifter, [Role.SHIFTER])
+    shifter.lose_controller()
+    assert NO_CONTROLLER in ride_status(LiveRide.of(engine))
     await user.open("/")
-    await user.should_see(LOCKED, retries=20)
-    click.press(Button.PLUS)
-    assert LOCKED not in ride_status(LiveRide.of(engine))
+    await user.should_see(NO_CONTROLLER, retries=20)
+    shifter.press(ObcButton.SHIFT_UP)
+    assert NO_CONTROLLER not in ride_status(LiveRide.of(engine))
 
 
 async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeypatch):
@@ -595,32 +595,6 @@ async def test_settings_switch_turns_virtual_shifting_on(user: User, engine, pag
     assert engine.controller.gearbox is None
 
 
-@pytest.mark.parametrize(
-    ("zwift_type", "note"),
-    [
-        (0x0B, "relays both controllers: needs a Zwift unlock every 24 h"),
-        (0x0A, "right controller: + harder, B easier, works without Zwift (recommended)"),
-    ],
-)
-async def test_scan_pairs_a_click_as_shifter(user: User, engine, monkeypatch, zwift_type, note):
-    from smart_trainer.ble import scanner
-    from smart_trainer.ble.device import DriverId
-
-    async def scan(timeout: float) -> list[scanner.Discovered]:
-        # the fake driver, so pairing doesn't reach for Bluetooth
-        return [
-            scanner.Discovered("click-1", "Zwift Click", -48, [DriverId.FAKE_CLICK], zwift_type)
-        ]
-
-    monkeypatch.setattr(scanner, "scan", scan)
-    await user.open("/devices")
-    user.find("Scan").click()
-    await user.should_see(note, retries=20)
-    user.find("Use as shifter").click()
-    assert engine.devices.assignment.get(Role.SHIFTER) == "click-1"
-    assert engine.settings.devices["click-1"].driver == DriverId.FAKE_CLICK
-
-
 async def test_scan_lists_bikecontrol_on_the_network_next_to_bluetooth(
     user: User, engine, monkeypatch
 ):
@@ -635,7 +609,7 @@ async def test_scan_lists_bikecontrol_on_the_network_next_to_bluetooth(
         # the fake driver, so pairing doesn't reach for the network
         return [
             scanner.Discovered(
-                "bc._openbikecontrol._tcp.local.", "BikeControl", None, [DriverId.FAKE_CLICK]
+                "bc._openbikecontrol._tcp.local.", "BikeControl", None, [DriverId.FAKE_SHIFTER]
             )
         ]
 

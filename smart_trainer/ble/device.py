@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar
 
-from smart_trainer.ble.parsers.zwift import Button
 from smart_trainer.core.state import ConnState, Reading, Role
 
 log = logging.getLogger(__name__)
@@ -34,9 +33,7 @@ class DriverId(StrEnum):
     FAKE_TRAINER = "fake_trainer"
     FAKE_POWER = "fake_power"
     FAKE_HR = "fake_hr"
-    ZWIFT_CLICK = "zwift_click"
-    ZWIFT_CLICK_RIGHT = "zwift_click_right"
-    FAKE_CLICK = "fake_click"
+    FAKE_SHIFTER = "fake_shifter"
     OPEN_BIKE_CONTROL = "open_bike_control"
 
 
@@ -187,11 +184,7 @@ class Shifter:
         SHIFT_STEPS (Mapping[Hashable, int]): Steps each button shifts: harder (+) or easier.
     """
 
-    SHIFT_STEPS: ClassVar[Mapping[Hashable, int]] = {
-        Button.PLUS: 1,
-        Button.MINUS: -1,
-        Button.B: -1,
-    }
+    SHIFT_STEPS: ClassVar[Mapping[Hashable, int]] = {}
 
     def __init__(self) -> None:
         """Initialize with no button pressed and no subscriber."""

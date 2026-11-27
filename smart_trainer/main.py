@@ -15,6 +15,7 @@ from nicegui import app, native, ui
 from smart_trainer.ble import fake
 from smart_trainer.ble.scanner import make_device
 from smart_trainer.config import APP_DIR, Settings
+from smart_trainer.core.devices import DeviceHub
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.state import Role
 from smart_trainer.logs import setup_logging
@@ -63,6 +64,24 @@ def _build(use_fake: bool, start_mini: bool, port: int) -> AppContext:
     )
 
 
+async def _add_paired(devices: DeviceHub, settings: Settings) -> None:
+    """Add the paired devices; forget those whose driver the app no longer has.
+
+    A driver can be removed in an update (the direct Zwift Click one was): keeping its
+    pairing would keep its role assigned to a device that never connects.
+
+    Args:
+        devices (DeviceHub): Where the devices are added.
+        settings (Settings): The pairings.
+    """
+    for pd in list(settings.devices.values()):
+        try:
+            devices.add(make_device(pd.driver, pd.address, pd.name))
+        except KeyError:
+            log.warning("forgetting %s: its driver %s no longer exists", pd.name, pd.driver)
+            await devices.remove(pd.address)
+
+
 async def _startup(ctx: AppContext) -> None:
     """Add the devices and start the engine (needs the running event loop).
 
@@ -75,11 +94,7 @@ async def _startup(ctx: AppContext) -> None:
         engine.devices.add(fake.FakePowerMeter(), [Role.POWER, Role.CADENCE])
         engine.devices.add(fake.FakeHeartRate(), [Role.HR])
     else:
-        for pd in settings.devices.values():
-            try:
-                engine.devices.add(make_device(pd.driver, pd.address, pd.name))
-            except KeyError:
-                log.warning("unknown driver %s for %s", pd.driver, pd.name)
+        await _add_paired(engine.devices, settings)
     await _lifetime.enter_async_context(engine)
     log.info("engine started (data dir: %s)", APP_DIR)
     if not use_fake and settings.sync_profile and engine.sync.connected(Capability.PROFILE):

@@ -1,4 +1,4 @@
-"""Command-line options of the app."""
+"""Command-line options of the app, and the devices it starts with."""
 
 import pytest
 
@@ -28,3 +28,23 @@ def test_a_native_window_gets_a_free_port(monkeypatch):
 def test_mini_implies_native():
     args = main._parse_args(["--mini"])
     assert args.mini and args.native
+
+
+async def test_pairings_whose_driver_is_gone_are_dropped(settings, tmp_path):
+    from smart_trainer.config import PairedDevice, Settings
+    from smart_trainer.core.engine import Engine
+    from smart_trainer.core.state import Role
+
+    settings.devices = {
+        "click": PairedDevice(address="click", name="Zwift Click", driver="zwift_click"),
+        "fake-hr": PairedDevice(address="fake-hr", name="Fake HR", driver="fake_hr"),
+    }
+    settings.role_assignment = {Role.SHIFTER.value: "click", Role.HR.value: "fake-hr"}
+    settings.save()
+    engine = Engine.from_settings(settings, sessions=tmp_path, run_loop=False)
+    await main._add_paired(engine.devices, settings)
+    assert list(engine.devices) == ["fake-hr"]
+    saved = Settings.load()
+    assert list(saved.devices) == ["fake-hr"]
+    assert saved.role_assignment == {Role.HR.value: "fake-hr"}
+    await engine.devices.stop_all()
