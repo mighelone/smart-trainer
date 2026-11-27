@@ -176,8 +176,8 @@ class DeviceHub(Mapping[str, Device]):
     def _shifted(self, device_id: str, steps: int) -> None:
         """Forward a shift if it comes from the device assigned as shifter.
 
-        Only one device shifts: of a Click v2 pair, both controllers report the button of
-        one side, and forwarding both would shift twice.
+        Only one device shifts: two that relay the same controller (BikeControl running on
+        two devices, say) would otherwise shift twice for one press.
 
         Args:
             device_id (str): Id of the device that shifted.

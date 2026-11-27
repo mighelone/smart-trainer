@@ -17,7 +17,6 @@ from smart_trainer.ble.device import (
     CalibrationProgress,
     Device,
 )
-from smart_trainer.ble.parsers.zwift import CLICK_V2_BOTH, CLICK_V2_SIDE
 from smart_trainer.config import Settings
 from smart_trainer.core.calibration import CalibrationService
 from smart_trainer.core.devices import DeviceHub
@@ -56,11 +55,6 @@ USE_LABEL = {
     Role.POWER: "Use for power",
     Role.HR: "Use for HR",
     Role.SHIFTER: "Use as shifter",
-}
-# What each controller of a Zwift Click v2 pair does, to help the rider pick the right one
-CLICK_SIDE_NOTE = {
-    CLICK_V2_BOTH: "relays both controllers: needs a Zwift unlock every 24 h",
-    CLICK_V2_SIDE: "right controller: + harder, B easier, works without Zwift (recommended)",
 }
 
 
@@ -371,8 +365,6 @@ class DevicesPage:
                 ui.label(found.name).classes("list-title")
                 signal = "network" if found.rssi is None else f"RSSI {found.rssi}"
                 details = [", ".join(sorted(found.roles)), signal]
-                if found.zwift_type in CLICK_SIDE_NOTE:
-                    details.append(CLICK_SIDE_NOTE[found.zwift_type])
                 ui.label(" · ".join(details)).classes("list-sub")
             ui.space()
             driver = DRIVERS[found.drivers[0]]
