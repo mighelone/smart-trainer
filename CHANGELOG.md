@@ -34,6 +34,11 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   **Settings → Ride**. It needs a speed reading from the trainer or a speed sensor to work on
   the flat.
 
+### Changed
+- On the ride page, the ride controls and the manual control (mode, slider and − / + shift
+  buttons) are right under the metric tiles, above the chart, so you can reach them while
+  riding without scrolling.
+
 ### Fixed
 - Info messages now reach the log: devices connecting and disconnecting, the Zwift Click
   handshake, profile sync. Until now only warnings were shown in the terminal, and the desktop

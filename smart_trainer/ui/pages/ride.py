@@ -86,9 +86,10 @@ class RidePage:
             self.warn = ui.label("").classes("status-bar")
             self._build_tiles()
             self._build_step_card()
-            self.holder = ui.card().classes("w-full p-2")
+            # The controls come before the chart, so they're on screen with the power tile
             self._build_controls()
             self._build_manual()
+            self.holder = ui.card().classes("w-full p-2").mark("ride-chart")
         self.cues = CuePlayer(self.ride, lambda: settings.interval_cues)
 
     # ------------------------------------------------------------- build

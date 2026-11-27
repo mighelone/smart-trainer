@@ -341,6 +341,16 @@ async def test_settings_switch_turns_the_spiral_guard_off(user: User, engine, pa
     assert isinstance(engine.controller.guard, SpiralGuard)
 
 
+async def test_ride_controls_come_before_the_chart(user: User, engine):
+    # NiceGUI shows a column's elements in the order they were created, and element ids grow
+    # in that order: the controls must not be pushed below the chart
+    await user.open("/")
+    start = user.find("Start").elements.pop()
+    slider = user.find(marker="manual-slider").elements.pop()
+    chart = user.find(marker="ride-chart").elements.pop()
+    assert start.id < slider.id < chart.id
+
+
 async def test_manual_control_sets_the_trainer_target(user: User, engine):
     await user.open("/")
     mode = user.find(marker="manual-mode").elements.pop()
