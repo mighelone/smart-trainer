@@ -31,8 +31,8 @@ MANUAL_SLIDER = {
     Mode.SLOPE: {"min": -10, "max": 20, "step": 0.5},
     Mode.ERG: {"min": 50, "max": 600, "step": 5},
 }
-# Keys that shift a virtual gear, by key name. "=" is the unshifted "+" key on most layouts;
-# the arrow keys are left alone because a focused slider already uses them.
+# Keys that shift (a virtual gear, or the resistance level), by key name. "=" is the unshifted
+# "+" key on most layouts; the arrow keys are left alone because a focused slider uses them.
 SHIFT_KEYS = {"+": 1, "=": 1, "-": -1}
 
 
@@ -181,20 +181,20 @@ class RidePage:
                 )
 
     def _build_gears(self) -> None:
-        """Build the virtual gear buttons and the keys that shift."""
+        """Build the shift buttons and keys: a virtual gear in slope, the level in resistance."""
         with ui.row().classes("items-center gap-1 shrink-0") as self.gear_box:
             ui.button(icon="remove", on_click=lambda: self.controller.shift(-1)).props(
                 "color=secondary round dense"
-            ).tooltip("Easier gear (-)").mark("shift-down")
+            ).tooltip("Easier (-)").mark("shift-down")
             self.gear_label = ui.label("").classes("control-value").mark("gear")
             ui.button(icon="add", on_click=lambda: self.controller.shift(1)).props(
                 "color=secondary round dense"
-            ).tooltip("Harder gear (+)").mark("shift-up")
+            ).tooltip("Harder (+)").mark("shift-up")
         ui.keyboard(on_key=self.on_key)
 
     # ---------------------------------------------------------- handlers
     def on_key(self, event: KeyEventArguments) -> None:
-        """Shift a virtual gear on the + and - keys.
+        """Shift on the + and - keys.
 
         Args:
             event (KeyEventArguments): The key event.
@@ -221,7 +221,8 @@ class RidePage:
             value (float): Slider value (percent, grade or watts depending on mode).
         """
         controller = self.controller
-        controller.set_target(controller.mode, value)
+        if value != controller.target_for(controller.mode):  # the refresh sync isn't a change
+            controller.set_target(controller.mode, value)
 
     async def do_finish(self, dialog: ui.dialog, upload: bool) -> None:
         """Finish the ride and notify the result.
@@ -355,9 +356,13 @@ class RidePage:
         )
         if manual and self.mode.value != controller.mode.value:
             self.mode.value = controller.mode.value
+        if manual and self.slider.value != controller.target_for(controller.mode):
+            self.slider.value = controller.target_for(controller.mode)  # moved by a shift
         gearbox = controller.gearbox
         self.gear_box.set_visibility(controller.shifting)
-        if gearbox is not None and controller.shifting:
+        geared = gearbox is not None and controller.mode == Mode.SLOPE
+        self.gear_label.set_visibility(geared)
+        if gearbox is not None and geared:
             self.gear_label.set_text(gear_text(gearbox, controller.slope_pct, snap.speed_kmh))
 
     def refresh_chart(self) -> None:

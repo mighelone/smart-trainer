@@ -97,6 +97,8 @@ SPIRAL_RESUME_RPM = 70
 SPIRAL_RESUME_S = 2.0
 SPIRAL_RELEASE_SLOPE = 0.0  # what the trainer gets while released: a flat road
 
+RESISTANCE_STEP_PCT = 5.0  # resistance change per shift in resistance mode, in % of the range
+
 
 class SpiralGuard:
     """Decides when to let go of the ERG target because the cadence collapsed.
@@ -153,7 +155,9 @@ class TrainerController:
     In ERG mode an injected :class:`SpiralGuard` may replace the ERG command with a flat
     road while the cadence has collapsed; the mode and the target stay as they are. In slope
     mode an injected :class:`VirtualGearbox` turns the grade into the one that makes the
-    trainer resist like that road ridden in the current virtual gear.
+    trainer resist like that road ridden in the current virtual gear. A shift (see
+    :meth:`shift`) changes the virtual gear in slope mode and the resistance level in
+    resistance mode.
 
     Attributes:
         RESEND_S (float): Seconds after which an unchanged command is resent.
@@ -242,23 +246,33 @@ class TrainerController:
 
     @property
     def shifting(self) -> bool:
-        """Whether shifting applies now: virtual shifting is on and the mode is slope.
+        """Whether :meth:`shift` does something now.
+
+        It does in resistance mode, and in slope mode while virtual shifting is on. In ERG the
+        workout or the slider sets the power, so a shift has nothing to change.
 
         Returns:
-            bool: ``True`` when :meth:`shift` changes the gear.
+            bool: ``True`` when :meth:`shift` changes the resistance or the gear.
         """
+        if self.mode == Mode.RESISTANCE:
+            return True
         return self.gearbox is not None and self.mode == Mode.SLOPE
 
     def shift(self, steps: int) -> None:
-        """Shift the virtual gear; does nothing unless :attr:`shifting`.
+        """Make the trainer harder (positive steps) or easier, when :attr:`shifting`.
 
-        Gears only exist in slope mode (see :mod:`smart_trainer.core.shifting`), so a shift
-        in another mode is ignored rather than changing a gear the rider can't feel.
+        In resistance mode each step moves the level by :data:`RESISTANCE_STEP_PCT`, kept
+        within 0-100 %. In slope mode it moves the virtual gear (see
+        :mod:`smart_trainer.core.shifting`); gears don't exist in other modes, so a shift
+        there is ignored rather than changing a gear the rider can't feel.
 
         Args:
-            steps (int): Gears to move, e.g. ``1`` for one gear harder.
+            steps (int): Steps to move, e.g. ``1`` for one step harder.
         """
-        if self.gearbox is not None and self.shifting:
+        if self.mode == Mode.RESISTANCE:
+            level = self.resistance_pct + steps * RESISTANCE_STEP_PCT
+            self.resistance_pct = max(0.0, min(100.0, level))
+        elif self.gearbox is not None and self.shifting:
             self.gearbox.shift(steps)
 
     def set_target(self, mode: Mode, value: float) -> None:
