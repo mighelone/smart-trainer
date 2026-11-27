@@ -35,6 +35,7 @@ class DriverId(StrEnum):
     FAKE_POWER = "fake_power"
     FAKE_HR = "fake_hr"
     ZWIFT_CLICK = "zwift_click"
+    ZWIFT_CLICK_RIGHT = "zwift_click_right"
     FAKE_CLICK = "fake_click"
 
 
@@ -181,10 +182,10 @@ class Shifter:
     keep reporting, doesn't shift again.
 
     Attributes:
-        SHIFT_STEPS (dict[Button, int]): Gears each button shifts.
+        SHIFT_STEPS (dict[Button, int]): Steps each button shifts: harder (+) or easier.
     """
 
-    SHIFT_STEPS: ClassVar[dict[Button, int]] = {Button.PLUS: 1, Button.MINUS: -1}
+    SHIFT_STEPS: ClassVar[dict[Button, int]] = {Button.PLUS: 1, Button.MINUS: -1, Button.B: -1}
 
     def __init__(self) -> None:
         """Initialize with no button pressed and no subscriber."""
@@ -198,6 +199,19 @@ class Shifter:
             cb (ShiftCallback): Called with the gears to shift on every press.
         """
         self._shift_callbacks.append(cb)
+
+    @property
+    def problem(self) -> str | None:
+        """Why the buttons don't work, for the rider; ``None`` when nothing is wrong.
+
+        Returns:
+            str | None: A short message, or ``None``.
+        """
+        return None
+
+    def release_all(self) -> None:
+        """Forget the buttons pressed, e.g. on a new connection, so the next press shifts."""
+        self._pressed = frozenset()
 
     def update_buttons(self, pressed: frozenset[Button]) -> None:
         """Take the latest button state and shift for each newly pressed button.

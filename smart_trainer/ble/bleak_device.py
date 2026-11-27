@@ -38,7 +38,8 @@ class BleakDevice(Device):
         """Connect to the device and block until stopped or disconnected.
 
         Calls :meth:`on_connected` once the link is up, then sets the state to
-        ``CONNECTED`` and waits for either a stop request or a lost connection.
+        ``CONNECTED`` and waits for a stop request, a lost connection or
+        :meth:`renewal_due`; the last one disconnects so that the supervisor reconnects.
         """
         lost = asyncio.Event()
         client = BleakClient(
@@ -51,14 +52,25 @@ class BleakDevice(Device):
                 await self.on_connected(client)
                 self.state = ConnState.CONNECTED
                 log.info("%s: connected", self.name)
-                stop_wait = asyncio.create_task(self._stop.wait())
-                lost_wait = asyncio.create_task(lost.wait())
-                await asyncio.wait({stop_wait, lost_wait}, return_when=asyncio.FIRST_COMPLETED)
-                stop_wait.cancel()
-                lost_wait.cancel()
+                waits = {
+                    asyncio.create_task(self._stop.wait()),
+                    asyncio.create_task(lost.wait()),
+                    asyncio.create_task(self.renewal_due()),
+                }
+                await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+                for wait in waits:
+                    wait.cancel()
             finally:
                 self.client = None
         log.info("%s: disconnected", self.name)
+
+    async def renewal_due(self) -> None:
+        """Return when the connection should be dropped and made again; by default never.
+
+        For devices that drop the link by themselves after a while and then sleep: making a
+        new connection before that keeps them awake.
+        """
+        await asyncio.Event().wait()
 
     @abstractmethod
     async def on_connected(self, client: BleakClient) -> None:

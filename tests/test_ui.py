@@ -8,6 +8,7 @@ from nicegui import app, ui
 from nicegui.testing import User
 
 from smart_trainer.ble import fake
+from smart_trainer.ble.parsers.zwift import Button
 from smart_trainer.core.control import Mode
 from smart_trainer.core.engine import Engine
 from smart_trainer.core.ride import RideState
@@ -301,6 +302,19 @@ async def test_cadence_alert_on_ride_and_mini(user: User, engine, pages):
     await user.should_see("Cadence high:", retries=20)  # replaces the step line
 
 
+async def test_ride_status_says_when_the_click_is_locked(user: User, engine, pages):
+    from smart_trainer.ble.zwift_click import LOCKED
+
+    click = fake.FakeClick()
+    engine.devices.add(click, [Role.SHIFTER])
+    click.lock()
+    assert LOCKED in ride_status(LiveRide.of(engine))
+    await user.open("/")
+    await user.should_see(LOCKED, retries=20)
+    click.press(Button.PLUS)
+    assert LOCKED not in ride_status(LiveRide.of(engine))
+
+
 async def test_ride_status_shows_erg_released(user: User, engine, pages, monkeypatch):
     from smart_trainer.core.workout import Step, Workout
 
@@ -573,7 +587,10 @@ async def test_settings_switch_turns_virtual_shifting_on(user: User, engine, pag
 
 @pytest.mark.parametrize(
     ("zwift_type", "note"),
-    [(0x0B, "reports both buttons: pair this one"), (0x0A, "reports only this side's button")],
+    [
+        (0x0B, "relays both controllers: needs a Zwift unlock every 24 h"),
+        (0x0A, "right controller: + harder, B easier, works without Zwift (recommended)"),
+    ],
 )
 async def test_scan_pairs_a_click_as_shifter(user: User, engine, monkeypatch, zwift_type, note):
     from smart_trainer.ble import scanner

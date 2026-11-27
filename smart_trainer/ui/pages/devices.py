@@ -57,10 +57,10 @@ USE_LABEL = {
     Role.HR: "Use for HR",
     Role.SHIFTER: "Use as shifter",
 }
-# What each controller of a Zwift Click v2 pair reports, to help the rider pick the right one
+# What each controller of a Zwift Click v2 pair does, to help the rider pick the right one
 CLICK_SIDE_NOTE = {
-    CLICK_V2_BOTH: "reports both buttons: pair this one",
-    CLICK_V2_SIDE: "reports only this side's button",
+    CLICK_V2_BOTH: "relays both controllers: needs a Zwift unlock every 24 h",
+    CLICK_V2_SIDE: "right controller: + harder, B easier, works without Zwift (recommended)",
 }
 
 

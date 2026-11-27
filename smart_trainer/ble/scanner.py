@@ -9,7 +9,7 @@ from bleak import BleakScanner
 # Import driver modules so they register themselves.
 from smart_trainer.ble import cycling_power, ftms, heart_rate, uuids, zwift_click  # noqa: F401
 from smart_trainer.ble.device import DRIVERS, Device, DriverId, drivers_for_services
-from smart_trainer.ble.parsers.zwift import zwift_device_type
+from smart_trainer.ble.parsers.zwift import CLICK_V2_SIDE, zwift_device_type
 
 FITNESS_SERVICES = [
     uuids.FTMS_SERVICE,
@@ -18,6 +18,9 @@ FITNESS_SERVICES = [
     uuids.CSC_SERVICE,
     uuids.ZWIFT_SERVICE,
 ]
+# Zwift controllers that need their own driver: they advertise the same service, so the
+# device type in the manufacturer data tells them apart
+ZWIFT_TYPE_DRIVER = {CLICK_V2_SIDE: DriverId.ZWIFT_CLICK_RIGHT}
 
 
 @dataclass
@@ -94,12 +97,13 @@ def discovered(
     Returns:
         Discovered | None: The device, or ``None`` if no driver handles it.
     """
-    drivers = drivers_for_services(service_uuids)
+    drivers = [d.DRIVER for d in drivers_for_services(service_uuids)]
     if not drivers:
         return None
-    return Discovered(
-        address, name, rssi, [d.DRIVER for d in drivers], zwift_device_type(manufacturer_data)
-    )
+    zwift_type = zwift_device_type(manufacturer_data)
+    if zwift_type in ZWIFT_TYPE_DRIVER:
+        drivers = [ZWIFT_TYPE_DRIVER[zwift_type]]
+    return Discovered(address, name, rssi, drivers, zwift_type)
 
 
 def make_device(driver: DriverId | str, address: str, name: str = "") -> Device:

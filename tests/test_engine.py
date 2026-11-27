@@ -318,6 +318,18 @@ async def test_click_presses_do_nothing_in_erg_mode(tmp_path):
     await engine.devices.stop_all()
 
 
+async def test_b_on_the_right_click_makes_the_trainer_easier(tmp_path):
+    async with _engine(tmp_path) as (engine, trainer, world):
+        click = fake.FakeClick(world=world)
+        engine.devices.add(click, [Role.SHIFTER])
+        engine.ride.start(None)
+        engine.controller.set_target(Mode.RESISTANCE, 25.0)
+        for button in (Button.B, Button.B, Button.PLUS):
+            click.press(button)
+        await _ride(engine, 2, 1_700_000_000)
+        assert (trainer.mode, trainer.value) == ("resistance", 20.0)
+
+
 async def test_click_presses_step_the_resistance(tmp_path):
     async with _engine(tmp_path) as (engine, trainer, world):
         click = fake.FakeClick(world=world)
