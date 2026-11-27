@@ -1,3 +1,4 @@
+import itertools
 import logging
 from typing import cast
 
@@ -6,12 +7,13 @@ import pytest
 from smart_trainer.ble.device import ControllableTrainer
 from smart_trainer.config import PowerMatch
 from smart_trainer.core.control import (
-    RESISTANCE_STEP_PCT,
+    RESISTANCE_LEVELS,
     SPIRAL_RELEASE_SLOPE,
     Mode,
     PowerMatcher,
     SpiralGuard,
     TrainerController,
+    next_resistance,
 )
 from smart_trainer.core.shifting import NEUTRAL_GEAR, VirtualGearbox
 from smart_trainer.core.state import Snapshot
@@ -250,15 +252,38 @@ async def test_erg_ignores_shifts(geared, trainer):
     assert geared.gearbox is not None and geared.gearbox.gear == NEUTRAL_GEAR
 
 
+@pytest.mark.parametrize("index", range(len(RESISTANCE_LEVELS)))
+def test_each_resistance_level_shifts_to_its_neighbours(index):
+    level = RESISTANCE_LEVELS[index]
+    up = RESISTANCE_LEVELS[min(index + 1, len(RESISTANCE_LEVELS) - 1)]
+    down = RESISTANCE_LEVELS[max(index - 1, 0)]
+    assert (next_resistance(level, 1), next_resistance(level, -1)) == (up, down)
+
+
+@pytest.mark.parametrize(
+    ("level", "steps", "expected"),
+    [(30.0, -2, 20.0), (5.0, 2, 8.0), (100.0, 3, 100.0), (0.0, -3, 0.0), (17.5, 0, 17.5)],
+)
+def test_next_resistance_moves_one_level_per_step(level, steps, expected):
+    assert next_resistance(level, steps) == expected
+
+
+def test_resistance_levels_are_finer_at_low_resistance():
+    assert RESISTANCE_LEVELS[0] == 0 and RESISTANCE_LEVELS[-1] == 100
+    gaps = [high - low for low, high in itertools.pairwise(RESISTANCE_LEVELS)]
+    assert gaps == sorted(gaps) and max(gaps[:5]) <= 2  # 2 % steps up to 10 %
+
+
 @pytest.mark.parametrize(
     ("start", "steps", "expected"),
     [
         (25.0, [1], 30.0),
-        (25.0, [-1, -1], 15.0),
-        (23.0, [1], 28.0),
+        (25.0, [-1, -1], 16.0),
+        (23.0, [1], 25.0),  # between two levels: the next one up
+        (23.0, [-1], 20.0),  # or down
         (98.0, [1], 100.0),
-        (3.0, [-1], 0.0),
-        (0.0, [-1, 1], RESISTANCE_STEP_PCT),
+        (3.0, [-1], 2.0),
+        (0.0, [-1, 1], 2.0),
     ],
 )
 @pytest.mark.parametrize("gearbox", [None, VirtualGearbox(rider_kg=lambda: 75.0)])

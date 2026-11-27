@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import logging
 import time
 from enum import StrEnum
@@ -97,7 +98,35 @@ SPIRAL_RESUME_RPM = 70
 SPIRAL_RESUME_S = 2.0
 SPIRAL_RELEASE_SLOPE = 0.0  # what the trainer gets while released: a flat road
 
-RESISTANCE_STEP_PCT = 5.0  # resistance change per shift in resistance mode, in % of the range
+# Resistance levels a shift moves between in resistance mode, in % of the trainer's range.
+# Like the cogs of a cassette the steps grow with the level: at low power (where riders sit
+# around 5-20 %) a fixed 5 % step was too coarse to fine-tune the effort, while near the top
+# small steps would take many presses. The trainer takes 0.5 % units, so all are sent exactly.
+RESISTANCE_LEVELS = (0, 2, 4, 6, 8, 10, 13, 16, 20, 25, 30, 40, 50, 65, 80, 100)
+
+
+def next_resistance(level_pct: float, steps: int) -> float:
+    """The resistance level ``steps`` levels away, moving along :data:`RESISTANCE_LEVELS`.
+
+    A level between two of the list (set with the slider) first goes to the next one in the
+    direction of the shift. The result stays within the list's ends.
+
+    Args:
+        level_pct (float): Current resistance in %.
+        steps (int): Levels to move: positive for harder, negative for easier.
+
+    Returns:
+        float: The new resistance in %.
+    """
+    level = float(level_pct)
+    for _ in range(abs(steps)):
+        if steps > 0:
+            index = bisect.bisect_right(RESISTANCE_LEVELS, level)
+            level = float(RESISTANCE_LEVELS[min(index, len(RESISTANCE_LEVELS) - 1)])
+        else:
+            index = bisect.bisect_left(RESISTANCE_LEVELS, level) - 1
+            level = float(RESISTANCE_LEVELS[max(index, 0)])
+    return level
 
 
 class SpiralGuard:
@@ -261,8 +290,8 @@ class TrainerController:
     def shift(self, steps: int) -> None:
         """Make the trainer harder (positive steps) or easier, when :attr:`shifting`.
 
-        In resistance mode each step moves the level by :data:`RESISTANCE_STEP_PCT`, kept
-        within 0-100 %. In slope mode it moves the virtual gear (see
+        In resistance mode each step moves to the next of :data:`RESISTANCE_LEVELS`, finer at
+        low resistance (see :func:`next_resistance`). In slope mode it moves the virtual gear (see
         :mod:`smart_trainer.core.shifting`); gears don't exist in other modes, so a shift
         there is ignored rather than changing a gear the rider can't feel.
 
@@ -270,8 +299,7 @@ class TrainerController:
             steps (int): Steps to move, e.g. ``1`` for one step harder.
         """
         if self.mode == Mode.RESISTANCE:
-            level = self.resistance_pct + steps * RESISTANCE_STEP_PCT
-            self.resistance_pct = max(0.0, min(100.0, level))
+            self.resistance_pct = next_resistance(self.resistance_pct, steps)
             log.info("shift %+d in resistance: %g %%", steps, self.resistance_pct)
         elif self.gearbox is not None and self.shifting:
             self.gearbox.shift(steps)
