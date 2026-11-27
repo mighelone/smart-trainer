@@ -1,3 +1,4 @@
+import logging
 from typing import cast
 
 import pytest
@@ -288,3 +289,19 @@ def test_turning_shifting_off_and_on_starts_in_the_real_gear(geared):
     assert not geared.shifting
     geared.set_gearbox(VirtualGearbox(rider_kg=lambda: 75.0))
     assert geared.gearbox is not None and geared.gearbox.gear == NEUTRAL_GEAR
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        (Mode.RESISTANCE, "shift +1 in resistance: 30 %"),
+        (Mode.SLOPE, f"shift +1 in slope: gear {NEUTRAL_GEAR + 1}"),
+        (Mode.ERG, "shift +1 ignored in erg mode"),
+    ],
+)
+def test_every_shift_is_logged(caplog, mode, message):
+    controller = TrainerController(PowerMatch(), gearbox=VirtualGearbox(rider_kg=lambda: 75.0))
+    controller.set_target(mode, 25.0 if mode == Mode.RESISTANCE else 2.0)
+    with caplog.at_level(logging.INFO, logger="smart_trainer.core.control"):
+        controller.shift(1)
+    assert [r.getMessage() for r in caplog.records] == [message]

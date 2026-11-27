@@ -272,8 +272,12 @@ class TrainerController:
         if self.mode == Mode.RESISTANCE:
             level = self.resistance_pct + steps * RESISTANCE_STEP_PCT
             self.resistance_pct = max(0.0, min(100.0, level))
+            log.info("shift %+d in resistance: %g %%", steps, self.resistance_pct)
         elif self.gearbox is not None and self.shifting:
             self.gearbox.shift(steps)
+            log.info("shift %+d in slope: gear %d", steps, self.gearbox.gear)
+        else:
+            log.info("shift %+d ignored in %s mode", steps, self.mode.value)
 
     def set_target(self, mode: Mode, value: float) -> None:
         """Switch to a mode and set its target.
