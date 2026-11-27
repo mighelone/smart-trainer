@@ -86,9 +86,11 @@ class RidePage:
             self.warn = ui.label("").classes("status-bar")
             self._build_tiles()
             self._build_step_card()
-            # The controls come before the chart, so they're on screen with the power tile
-            self._build_controls()
-            self._build_manual()
+            # The controls come before the chart, so they're on screen with the power tile; one
+            # card for both rows keeps them compact
+            with ui.card().classes("w-full panel gap-3"):
+                self._build_controls()
+                self._build_manual()
             self.holder = ui.card().classes("w-full p-2").mark("ride-chart")
         self.cues = CuePlayer(self.ride, lambda: settings.interval_cues)
 
@@ -117,13 +119,13 @@ class RidePage:
 
     def _build_controls(self) -> None:
         """Build the ride controls: start/pause/skip/lap, intensity, ERG and finish."""
-        with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-3 w-full"):
+        with ui.row().classes("items-center gap-3 w-full"):
             self.btn_start = ui.button(
                 "Start", icon="play_arrow", on_click=lambda: start_ride(self.ride)
-            ).props("color=positive size=lg padding='8px 28px'")
+            ).props("color=positive padding='6px 24px'")
             self.btn_pause = ui.button(
                 "Pause", icon="pause", on_click=lambda: self.ride.toggle_pause()
-            ).props("color=primary size=lg padding='8px 24px'")
+            ).props("color=primary padding='6px 20px'")
             self.btn_skip = ui.button(
                 "Skip", icon="skip_next", on_click=lambda: self.ride.skip_step()
             ).props("color=secondary")
@@ -144,12 +146,12 @@ class RidePage:
             )
             ui.space()
             self.btn_finish = ui.button("Finish", icon="stop", on_click=self.confirm_finish).props(
-                "color=negative outline size=lg padding='8px 24px'"
+                "color=negative outline padding='6px 20px'"
             )
 
     def _build_manual(self) -> None:
         """Build the manual control (mode and slider) and the power source toggle."""
-        with ui.card().classes("w-full panel"), ui.row().classes("items-center gap-6 w-full"):
+        with ui.row().classes("items-center gap-6 w-full"):
             with ui.row().classes("items-center gap-4 grow no-wrap") as self.manual_box:
                 ui.label("Manual").classes("field-label")
                 mode = self.controller.mode if self.ride.runner is None else Mode.RESISTANCE

@@ -37,7 +37,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 ### Changed
 - On the ride page, the ride controls and the manual control (mode, slider and − / + shift
   buttons) are right under the metric tiles, above the chart, so you can reach them while
-  riding without scrolling.
+  riding without scrolling. They share one compact card, with normal-size Start, Pause and
+  Finish buttons.
 
 ### Fixed
 - Info messages now reach the log: devices connecting and disconnecting, the Zwift Click
