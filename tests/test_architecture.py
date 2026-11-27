@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 PACKAGE = Path(__file__).parent.parent / "smart_trainer"
-UI_FREE = ["core", "ble", "export", "sync"]  # layers that must work without the UI
+UI_FREE = ["core", "ble", "obc", "export", "sync"]  # layers that must work without the UI
 
 
 def _imports(path: Path) -> set[str]:

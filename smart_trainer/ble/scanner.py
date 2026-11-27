@@ -10,6 +10,7 @@ from bleak import BleakScanner
 from smart_trainer.ble import cycling_power, ftms, heart_rate, uuids, zwift_click  # noqa: F401
 from smart_trainer.ble.device import DRIVERS, Device, DriverId, drivers_for_services
 from smart_trainer.ble.parsers.zwift import CLICK_V2_SIDE, zwift_device_type
+from smart_trainer.obc import device as obc_device  # noqa: F401  (registers over the network)
 
 FITNESS_SERVICES = [
     uuids.FTMS_SERVICE,
@@ -25,12 +26,12 @@ ZWIFT_TYPE_DRIVER = {CLICK_V2_SIDE: DriverId.ZWIFT_CLICK_RIGHT}
 
 @dataclass
 class Discovered:
-    """A fitness device found during a BLE scan.
+    """A fitness device found during a scan: over Bluetooth, or on the network.
 
     Attributes:
-        address (str): Device address.
+        address (str): Device address (a service name for a network device).
         name (str): Advertised device name.
-        rssi (int): Signal strength in dBm.
+        rssi (int | None): Signal strength in dBm; ``None`` for a network device.
         drivers (list[DriverId]): Matching driver identifiers, best first.
         zwift_type (int | None): Zwift device type from the manufacturer data, ``None`` for
             other devices.
@@ -38,7 +39,7 @@ class Discovered:
 
     address: str
     name: str
-    rssi: int
+    rssi: int | None
     drivers: list[DriverId]  # best first
     zwift_type: int | None = None
 
@@ -75,7 +76,7 @@ async def scan(timeout: float = 6.0) -> list[Discovered]:
         )
         for address, (dev, adv) in found.items()
     ]
-    return sorted((d for d in out if d is not None), key=lambda d: -d.rssi)
+    return sorted((d for d in out if d is not None), key=lambda d: -(d.rssi or 0))
 
 
 def discovered(

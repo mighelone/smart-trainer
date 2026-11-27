@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 
 from bleak import BleakClient
@@ -15,7 +15,6 @@ from smart_trainer.ble.bleak_device import BleakDevice
 from smart_trainer.ble.device import DriverId, Shifter, register
 from smart_trainer.ble.parsers.zwift import (
     IGNORED_MESSAGES,
-    Button,
     is_unlock_request,
     parse_buttons,
 )
@@ -184,11 +183,11 @@ class ZwiftClickRight(ZwiftClick):
         self.keep_awake.touch()
         await super().on_connected(client)
 
-    def update_buttons(self, pressed: frozenset[Button]) -> None:
+    def update_buttons(self, pressed: frozenset[Hashable]) -> None:
         """Shift for new presses; a press also restarts the controller's own 60 s timer.
 
         Args:
-            pressed (frozenset[Button]): The buttons pressed now.
+            pressed (frozenset[Hashable]): The buttons pressed now.
         """
         if pressed:
             self.keep_awake.touch()

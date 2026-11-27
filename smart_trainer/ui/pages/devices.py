@@ -326,24 +326,34 @@ class DevicesPage:
 
     # ------------------------------------------------------------- scan
     async def do_scan(self) -> None:
-        """Scan for BLE devices and list them with role buttons."""
+        """Scan Bluetooth and the network together, and list what is found with role buttons.
+
+        A failing scan is reported; the other one's devices are still listed.
+        """
         from smart_trainer.ble.scanner import scan
+        from smart_trainer.obc.discovery import browse
 
         self.found.clear()
         self.scan_btn.props("loading")
         try:
-            results = await scan(6.0)
-        except Exception as exc:
-            log.warning("Bluetooth scan failed: %s", exc)
+            ble, network = await asyncio.gather(scan(6.0), browse(6.0), return_exceptions=True)
+        finally:
+            self.scan_btn.props(remove="loading")
+        results: list[Discovered] = []
+        if isinstance(ble, BaseException):
+            log.warning("Bluetooth scan failed: %s", ble)
             ui.notify(
-                f"Bluetooth scan failed: {exc}. Check that Bluetooth is on and allowed "
+                f"Bluetooth scan failed: {ble}. Check that Bluetooth is on and allowed "
                 "for your terminal in System Settings → Privacy & Security → Bluetooth.",
                 type="negative",
                 multi_line=True,
             )
-            return
-        finally:
-            self.scan_btn.props(remove="loading")
+        else:
+            results += ble
+        if isinstance(network, BaseException):
+            log.warning("network scan for BikeControl failed: %s", network)
+        else:
+            results += network
         with self.found:
             if not results:
                 ui.label("Nothing found.").classes("hint")
@@ -359,7 +369,8 @@ class DevicesPage:
         with ui.card().classes("w-full panel"), ui.row().classes("items-center w-full"):
             with ui.column().classes("gap-0"):
                 ui.label(found.name).classes("list-title")
-                details = [", ".join(sorted(found.roles)), f"RSSI {found.rssi}"]
+                signal = "network" if found.rssi is None else f"RSSI {found.rssi}"
+                details = [", ".join(sorted(found.roles)), signal]
                 if found.zwift_type in CLICK_SIDE_NOTE:
                     details.append(CLICK_SIDE_NOTE[found.zwift_type])
                 ui.label(" · ".join(details)).classes("list-sub")

@@ -21,13 +21,14 @@ crash-safe and uploads them to training platforms.
 | Package | Responsibility |
 |---|---|
 | `smart_trainer/ble/` | Bluetooth devices: scanning, FTMS / Cycling Power / HR parsing, fake devices |
+| `smart_trainer/obc/` | Controllers relayed over the network with OpenBikeControl (BikeControl): mDNS discovery, TCP device |
 | `smart_trainer/core/` | App logic, UI-agnostic: `Engine`, `Ride`, `TrainerController`, `SessionStore`, recorder, workouts |
 | `smart_trainer/export/` | FIT export |
 | `smart_trainer/sync/` | Connections to platforms (intervals.icu, Strava) |
 | `smart_trainer/ui/` | NiceGUI pages and widgets |
 
 Dependency rules:
-- `core`, `ble`, `export` and `sync` never import `ui` (checked by `tests/test_architecture.py`).
+- `core`, `ble`, `obc`, `export` and `sync` never import `ui` (checked by `tests/test_architecture.py`).
 
 ## State
 

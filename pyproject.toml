@@ -21,6 +21,7 @@ dependencies = [
     "fit-tool>=0.9.13",
     "pydantic>=2.7",
     "keyring>=25",
+    "zeroconf>=0.132",
 ]
 
 [project.optional-dependencies]
