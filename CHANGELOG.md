@@ -13,9 +13,8 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
 ### Added
 - **Zwift Click v2 as a shifter:** the Click's + and − buttons shift the virtual gears (turn on
   virtual shifting in **Settings → Ride** and ride in **Slope** mode). Scan on the **Devices**
-  page and choose **Use as shifter** on the controller marked "reports both buttons": one
-  controller of the pair forwards the other's button, so that one is all you need. The Click
-  accepts one connection at a time, so close Zwift (or any other app using it) first.
+  page and choose **Use as shifter** on one of its controllers (see below for which). The
+  Click accepts one connection at a time, so close Zwift (or any other app using it) first.
 - **The Zwift Click v2's right controller works on its own, without a Zwift unlock:** pair the
   controller marked "right controller" on the **Devices** page; **+** makes the trainer harder
   and **B** easier. The other controller, which relays both sides, is locked by Zwift unless
@@ -23,8 +22,10 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   right controller turns itself off after a minute without a press, so the app reconnects it
   before then: a press in the few seconds this takes, once a minute while you don't shift, is
   lost.
-- In **Resistance** mode (a free ride, or a workout with ERG off), the Click's + and − make the
-  trainer 5 % harder or easier, with or without virtual shifting. The − and + buttons on the
+- In **Resistance** mode (a free ride, or a workout with ERG off), the Click's buttons make the
+  trainer harder or easier, with or without virtual shifting. Each press moves to the next of
+  0 · 2 · 4 · 6 · 8 · 10 · 13 · 16 · 20 · 25 · 30 · 40 · 50 · 65 · 80 · 100 %: small steps at
+  low resistance to fine-tune the effort, bigger ones near the top. The − and + buttons on the
   ride page and the - and + keys do the same, and the slider follows.
 - **Virtual shifting** for a bike with a single cog (such as a Zwift Cog): in **Slope** mode,
   shift 15 virtual gears with the − and + buttons on the ride page, or the - and + keys. Gear 8

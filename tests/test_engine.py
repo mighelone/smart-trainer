@@ -342,7 +342,7 @@ async def test_click_presses_step_the_resistance(tmp_path):
             click.press(button)
         click.hold(Button.PLUS, repeats=30)  # held: one more step, not 30
         await _ride(engine, 2, 1_700_000_002)
-        assert (trainer.mode, trainer.value) == ("resistance", 35.0)
+        assert (trainer.mode, trainer.value) == ("resistance", 40.0)  # 25-30-40-30-40
 
 
 async def test_only_the_assigned_shifter_shifts():
