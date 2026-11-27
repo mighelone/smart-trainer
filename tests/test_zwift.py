@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from smart_trainer.ble.device import DriverId
 from smart_trainer.ble.parsers.zwift import (
     CLICK_V2_BOTH,
+    CLICK_V2_SIDE,
     ZWIFT_COMPANY_ID,
     Button,
     parse_buttons,
@@ -12,13 +14,17 @@ from smart_trainer.ble.parsers.zwift import (
 )
 from smart_trainer.ble.scanner import discovered
 from smart_trainer.ble.uuids import HEART_RATE_SERVICE, ZWIFT_SERVICE
-from smart_trainer.ble.zwift_click import RIDE_ON, ZwiftClick
+from smart_trainer.ble.zwift_click import LOCKED, RIDE_ON, KeepAwake, ZwiftClick, ZwiftClickRight
 
 # Messages captured from a Zwift Click v2 pair
 IDLE = bytes.fromhex("23 08 ff ff ff ff 0f")
 PLUS = bytes.fromhex("23 08 ff df ff ff 0f")
 MINUS = bytes.fromhex("23 08 ff fd ff ff 0f")
 BOTH = bytes.fromhex("23 08 ff dd ff ff 0f")
+B = bytes.fromhex("23 08 df ff ff ff 0f")  # the right controller's B
+Y = bytes.fromhex("23 08 bf ff ff ff 0f")  # its Y: not used
+# Unlock request of a locked controller (captured, shortened)
+UNLOCK = bytes.fromhex("ff 03 00 0a 21 02 8a fd ab a5 e0 6b f9 b8 0d 40 d7 98 bb 26 52 d3 17 0e")
 OTHER_BIT = bytes.fromhex("23 08 ef ff ff ff 0f")  # an unknown button: not a shift
 BATTERY = bytes.fromhex("19 10 64")
 DEVICE_INFO = bytes.fromhex("2a 08 03 12 12 12 10 08 0c 10 00 18 24 22 05 00 00 00 d3 1f 28 fb 01")
@@ -35,6 +41,8 @@ SERIAL = bytes.fromhex(
         (MINUS, {Button.MINUS}),
         (BOTH, {Button.PLUS, Button.MINUS}),
         (OTHER_BIT, set()),
+        (B, {Button.B}),
+        (Y, set()),
         (BATTERY, None),
         (DEVICE_INFO, None),
         (SERIAL, None),
@@ -61,13 +69,20 @@ def test_zwift_device_type(manufacturer_data, device_type):
     assert zwift_device_type(manufacturer_data) == device_type
 
 
-def test_scan_matches_a_click_to_its_driver():
+@pytest.mark.parametrize(
+    ("advert", "zwift_type", "driver"),
+    [
+        ("0b 69 e6", CLICK_V2_BOTH, DriverId.ZWIFT_CLICK),
+        ("0a 2f da", CLICK_V2_SIDE, DriverId.ZWIFT_CLICK_RIGHT),
+    ],
+)
+def test_scan_matches_each_click_controller_to_its_driver(advert, zwift_type, driver):
     found = discovered(
-        "CAE4", "Zwift Click", -48, [ZWIFT_SERVICE], {ZWIFT_COMPANY_ID: bytes.fromhex("0b 69 e6")}
+        "CAE4", "Zwift Click", -48, [ZWIFT_SERVICE], {ZWIFT_COMPANY_ID: bytes.fromhex(advert)}
     )
     assert found is not None
-    assert found.drivers == [DriverId.ZWIFT_CLICK] and found.roles == {"shifter"}
-    assert found.zwift_type == CLICK_V2_BOTH
+    assert found.drivers == [driver] and found.roles == {"shifter"}
+    assert found.zwift_type == zwift_type
 
 
 def test_scan_ignores_unknown_devices_and_types_others():
@@ -94,6 +109,8 @@ def click() -> tuple[ZwiftClick, list[int]]:
         ([PLUS, BOTH, PLUS, IDLE], [1, -1]),  # "-" pressed while "+" is held
         ([IDLE, BATTERY, PLUS, BATTERY, PLUS, IDLE], [1]),  # status messages in between
         ([IDLE, OTHER_BIT, IDLE], []),
+        ([IDLE, B, B, IDLE, PLUS, IDLE], [-1, 1]),  # B easier, + harder
+        ([IDLE, Y, IDLE], []),
     ],
 )
 def test_click_shifts_once_per_press(click, messages, expected):
@@ -120,3 +137,58 @@ def test_a_refused_handshake_is_logged(click, caplog, reply, warned):
     with caplog.at_level(logging.WARNING):
         device.handle_reply(reply)
     assert any("handshake refused" in r.getMessage() for r in caplog.records) is warned
+
+
+def test_a_locked_click_says_so_until_it_sends_buttons(click, caplog):
+    device, shifts = click
+    assert device.problem is None
+    with caplog.at_level(logging.WARNING):
+        for message in [IDLE, UNLOCK, BATTERY, UNLOCK]:
+            device.handle(message)
+    assert device.problem == LOCKED
+    assert [r.getMessage() for r in caplog.records] == [
+        "Zwift Click: locked by Zwift (unlock request received)"
+    ]
+    device.handle(PLUS)
+    assert device.problem is None and shifts == [1]
+
+
+class Clock:
+    """A monotonic clock moved by hand."""
+
+    def __init__(self) -> None:
+        self.time = 1000.0
+
+    def __call__(self) -> float:
+        return self.time
+
+
+@pytest.mark.parametrize(
+    ("press_at", "now", "due"),
+    [(None, 49.9, False), (None, 50.0, True), (30.0, 79.9, False), (30.0, 80.0, True)],
+)
+def test_keep_awake_is_due_50_s_after_connecting_or_the_last_press(press_at, now, due):
+    clock = Clock()
+    right = ZwiftClickRight("A66F", "Zwift Click", KeepAwake(now=clock))
+    right.keep_awake.touch()  # what connecting does
+    if press_at is not None:
+        clock.time += press_at
+        right.handle(PLUS)
+        right.handle(IDLE)
+        clock.time -= press_at
+    clock.time += now
+    assert right.keep_awake.due() is due
+
+
+async def test_the_right_controller_renews_its_connection_when_quiet(monkeypatch):
+    from smart_trainer.ble import zwift_click
+
+    monkeypatch.setattr(zwift_click, "RENEW_POLL_S", 0.01)
+    clock = Clock()
+    right = ZwiftClickRight("A66F", "Zwift Click", KeepAwake(now=clock))
+    right.keep_awake.touch()
+    renewal = asyncio.create_task(right.renewal_due())
+    await asyncio.sleep(0.05)
+    assert not renewal.done()
+    clock.time += 50
+    await asyncio.wait_for(renewal, 1)

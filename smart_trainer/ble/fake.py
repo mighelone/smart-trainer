@@ -24,6 +24,7 @@ from smart_trainer.ble.device import (
     register,
 )
 from smart_trainer.ble.parsers.zwift import Button
+from smart_trainer.ble.zwift_click import LOCKED
 from smart_trainer.core.state import ConnState, Reading, Role
 
 
@@ -341,7 +342,10 @@ class FakeHeartRate(_FakeBase):
 
 @register
 class FakeClick(_FakeBase, Shifter):
-    """Simulated shift buttons, pressed by tests with :meth:`press` and :meth:`hold`."""
+    """Simulated shift buttons, pressed by tests with :meth:`press` and :meth:`hold`.
+
+    :meth:`lock` simulates a controller that Zwift has locked, as :attr:`problem` reports.
+    """
 
     DRIVER = DriverId.FAKE_CLICK
     ROLES = frozenset({Role.SHIFTER})
@@ -356,6 +360,20 @@ class FakeClick(_FakeBase, Shifter):
         """
         _FakeBase.__init__(self, address, name, world)
         Shifter.__init__(self)
+        self._locked = False
+
+    @property
+    def problem(self) -> str | None:
+        """Why the buttons don't work: set by :meth:`lock`, cleared by a press.
+
+        Returns:
+            str | None: The message for the rider, or ``None``.
+        """
+        return LOCKED if self._locked else None
+
+    def lock(self) -> None:
+        """Behave like a controller locked by Zwift: it asks for an unlock."""
+        self._locked = True
 
     def step(self) -> None:
         """Do nothing: the controller only reports buttons, when they are pressed."""
@@ -375,6 +393,7 @@ class FakeClick(_FakeBase, Shifter):
             button (Button): The button.
             repeats (int): Button state messages sent while it is held.
         """
+        self._locked = False  # it sends buttons, as the real one does once unlocked
         for _ in range(repeats):
             self.update_buttons(frozenset({button}))
         self.update_buttons(frozenset())

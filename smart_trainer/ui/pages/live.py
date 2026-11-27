@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
+from smart_trainer.ble.device import Shifter
 from smart_trainer.config import Settings
 from smart_trainer.core.control import SPIRAL_RESUME_RPM, Mode
 from smart_trainer.core.ride import Ride, RideState
@@ -51,6 +52,9 @@ def ride_status(live: LiveRide) -> list[str]:
     status += snapshot.warnings
     if devices.device_for(Role.TRAINER) and not devices.trainer_connected():
         status.append("Trainer disconnected: reconnecting…")
+    shifter = devices.device_for(Role.SHIFTER)
+    if isinstance(shifter, Shifter) and shifter.problem:
+        status.append(shifter.problem)
     return status
 
 

@@ -16,6 +16,13 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   page and choose **Use as shifter** on the controller marked "reports both buttons": one
   controller of the pair forwards the other's button, so that one is all you need. The Click
   accepts one connection at a time, so close Zwift (or any other app using it) first.
+- **The Zwift Click v2's right controller works on its own, without a Zwift unlock:** pair the
+  controller marked "right controller" on the **Devices** page; **+** makes the trainer harder
+  and **B** easier. The other controller, which relays both sides, is locked by Zwift unless
+  the Zwift app unlocked it in the last 24 hours; when it is, the ride screen now says so. The
+  right controller turns itself off after a minute without a press, so the app reconnects it
+  before then: a press in the few seconds this takes, once a minute while you don't shift, is
+  lost.
 - In **Resistance** mode (a free ride, or a workout with ERG off), the Click's + and − make the
   trainer 5 % harder or easier, with or without virtual shifting. The − and + buttons on the
   ride page and the - and + keys do the same, and the slider follows.

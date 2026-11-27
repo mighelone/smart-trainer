@@ -14,6 +14,13 @@ message. The button state message looks like::
 
 ``ff ff ff ff 0f`` is ``0xFFFFFFFF``: nothing pressed. While a button is held, the
 controller repeats the message about every 0.1 s.
+
+A Click v2 pair is two controllers. The right one (device type ``0x0A``) has five buttons and
+reports only its own: Y (bit 6, top), Z (bit 7), A (bit 4), B (bit 5) and + (bit 12, bottom).
+The other one (``0x0B``) also relays the right one's buttons, and its own − is bit 8. Zwift
+locks the relaying controller unless the Zwift app unlocked it in the last ~24 h: it then
+sends an unlock request (``ff 03 …``) a few seconds after connecting, and no button messages
+after about a minute. The right controller isn't locked.
 """
 
 from __future__ import annotations
@@ -21,16 +28,18 @@ from __future__ import annotations
 from enum import StrEnum
 
 ZWIFT_COMPANY_ID = 0x094A  # Bluetooth company ID in the manufacturer data of Zwift devices
-# Device type, the first byte of the manufacturer data. Of a Click v2 pair, one controller
-# forwards the other's button presses, so connecting to it alone gives both buttons.
-CLICK_V2_BOTH = 0x0B  # reports both sides' buttons
-CLICK_V2_SIDE = 0x0A  # reports only its own button
+# Device type, the first byte of the manufacturer data
+CLICK_V2_BOTH = 0x0B  # relays both controllers' buttons; locked by Zwift without an unlock
+CLICK_V2_SIDE = 0x0A  # the right controller: only its own buttons, never locked
 
 BUTTON_STATE = 0x23  # message type of the button bitmap
 BITMAP_TAG = 0x08  # protobuf tag of field 1 (varint) holding the bitmap
 # Other message types the Click sends, all ignored: 0x15 and 0x19 idle and battery (``19 10 64``
 # = 100 %), 0x2A device information after connecting, 0xFF serial number and other status.
 IGNORED_MESSAGES = frozenset({0x15, 0x19, 0x2A, 0xFF})
+# Start of Zwift's unlock request, sent by a locked controller (it carries a public key for
+# Zwift's encrypted handshake, which only the Zwift app can answer)
+UNLOCK_REQUEST = b"\xff\x03"
 
 
 class Button(StrEnum):
@@ -38,10 +47,12 @@ class Button(StrEnum):
 
     PLUS = "plus"
     MINUS = "minus"
+    B = "b"
 
 
-# Bit of each button in the bitmap, from the captures: "+" clears bit 12, "-" clears bit 8.
-BUTTON_BIT = {Button.PLUS: 12, Button.MINUS: 8}
+# Bit of each button that shifts, from the captures. The right controller's A, Y and Z (bits
+# 4, 6, 7) are not used yet.
+BUTTON_BIT = {Button.PLUS: 12, Button.MINUS: 8, Button.B: 5}
 
 
 def _varint(data: bytes, offset: int) -> int | None:
@@ -78,6 +89,18 @@ def parse_buttons(data: bytes) -> frozenset[Button] | None:
     if bitmap is None:
         return None
     return frozenset(button for button, bit in BUTTON_BIT.items() if not bitmap >> bit & 1)
+
+
+def is_unlock_request(data: bytes) -> bool:
+    """Whether a message is the unlock request of a controller Zwift has locked.
+
+    Args:
+        data (bytes): Raw notification payload.
+
+    Returns:
+        bool: ``True`` for an unlock request.
+    """
+    return data.startswith(UNLOCK_REQUEST)
 
 
 def zwift_device_type(manufacturer_data: dict[int, bytes]) -> int | None:
