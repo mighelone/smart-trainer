@@ -41,6 +41,11 @@ from smart_trainer.sync.service import ConnectionsFactory, SyncService
 
 log = logging.getLogger(__name__)
 
+# Longest a tick waits for a trainer command, in seconds. A command usually takes well under
+# this; one that hangs (a trainer dropping the link mid-write took up to 3.9 s) finishes in
+# the background, so the ride keeps recording.
+CONTROL_WAIT_S = 0.25
+
 
 @dataclass(kw_only=True, eq=False)
 class Engine:
@@ -60,6 +65,8 @@ class Engine:
         calibration (CalibrationService): Device calibration.
         ride (Ride): The ride in progress.
         tick_s (float): Loop interval in seconds.
+        control_wait_s (float): Longest a tick waits for the trainer command it sent, in
+            seconds (see :data:`CONTROL_WAIT_S`).
         run_loop (bool): Whether entering the context starts the 1 Hz loop. Turn it off
             to drive :meth:`tick` by hand (e.g. in tests with simulated time).
         snapshot (Snapshot): Latest effective metrics, published by :meth:`tick`
@@ -76,10 +83,12 @@ class Engine:
     calibration: CalibrationService
     ride: Ride
     tick_s: float = 1.0
+    control_wait_s: float = CONTROL_WAIT_S
     run_loop: bool = True
     snapshot: Snapshot = field(default_factory=Snapshot, init=False)
     _task: asyncio.Task | None = field(default=None, init=False, repr=False)
     _last_tick_mono: float | None = field(default=None, init=False, repr=False)
+    _control: asyncio.Task | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def from_settings(
@@ -200,6 +209,11 @@ class Engine:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        if self._control is not None:
+            self._control.cancel()  # a command still in flight: the trainer is stopping too
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._control
+            self._control = None
         await self.devices.stop_all()
         self.ride.close()  # not finished: the session stays 'active', hence recoverable
 
@@ -230,6 +244,10 @@ class Engine:
         The ride advances by the monotonic time since the previous tick (clamped to
         ``0..MAX_TICK_DT_S``), so a late tick doesn't make the workout clock drift.
 
+        The trainer command is waited for at most :attr:`control_wait_s`; a slower one
+        finishes in the background, and no other is sent until it has. The next tick then
+        sends whatever is current, so a slow trainer never stalls the ride nor builds a queue.
+
         Args:
             now_wall (float | None): Current unix time, used for recording;
                 defaults to ``time.time()``.
@@ -245,7 +263,14 @@ class Engine:
         self.ride.tick(snapshot, now_wall, dt)
         if self.calibration.suspends_control(assignment.trainer_id):
             return  # never send resistance commands while the trainer spins down
-        await self.controller.apply(snapshot, self.devices.trainer_connected(), now_mono)
+        if self._control is not None and not self._control.done():
+            return  # the previous command is still in flight
+        self._control = asyncio.create_task(
+            self.controller.apply(snapshot, self.devices.trainer_connected(), now_mono),
+            name="trainer-command",
+        )
+        self._control.add_done_callback(_log_control_failure)
+        await asyncio.wait({self._control}, timeout=self.control_wait_s)
 
     def _elapsed_since_last_tick(self, now_mono: float) -> float:
         """Measure the time since the previous tick and remember this one.
@@ -261,6 +286,19 @@ class Engine:
         if last is None:
             return self.tick_s
         return min(max(now_mono - last, 0.0), MAX_TICK_DT_S)
+
+
+def _log_control_failure(task: asyncio.Task) -> None:
+    """Log a trainer command that failed unexpectedly, as a failing tick would be.
+
+    The controller handles the trainer's own errors; this catches bugs, which would
+    otherwise go unnoticed in a background task.
+
+    Args:
+        task (asyncio.Task): The finished command.
+    """
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        log.error("trainer command failed", exc_info=exc)
 
 
 def _gearbox(settings: Settings) -> VirtualGearbox:

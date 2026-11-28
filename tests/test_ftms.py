@@ -19,6 +19,7 @@ class FakeClient:
         self.handlers: dict[str, Callable[[object, bytearray], None]] = {}
         self.writes: list[bytes] = []
         self.status_supported = status_supported
+        self.is_connected = True
 
     async def start_notify(self, uuid: str, handler) -> None:
         if uuid == uuids.FTMS_STATUS and not self.status_supported:
@@ -67,3 +68,11 @@ async def test_losing_control_is_noticed():
     trainer = await _connect(client)
     client.notify(uuids.FTMS_STATUS, bytes([FtmsStatus.CONTROL_LOST]))
     assert not trainer.has_control
+
+
+async def test_no_command_is_written_once_the_link_is_down():
+    client = FakeClient()
+    trainer = await _connect(client)
+    client.is_connected = False  # the trainer dropped; bleak hasn't told the app yet
+    await trainer.set_slope(1.0)
+    assert [w[0] for w in client.writes] == [FtmsOp.REQUEST_CONTROL, FtmsOp.START_RESUME]

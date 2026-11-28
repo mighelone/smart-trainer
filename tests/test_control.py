@@ -330,3 +330,14 @@ def test_every_shift_is_logged(caplog, mode, message):
     with caplog.at_level(logging.INFO, logger="smart_trainer.core.control"):
         controller.shift(1)
     assert [r.getMessage() for r in caplog.records] == [message]
+
+
+async def test_a_failed_command_is_logged_with_what_was_sent(controller, trainer, caplog):
+    async def dropped(watts: float) -> None:
+        raise OSError("disconnected")
+
+    trainer.set_erg = dropped
+    with caplog.at_level(logging.WARNING):
+        sent = await controller.apply(Snapshot(cadence=90, power=250), connected=True, now=0.0)
+    assert sent is None
+    assert "trainer command failed (erg 250): disconnected" in caplog.text
