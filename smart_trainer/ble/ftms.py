@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from bleak import BleakClient
 
@@ -160,16 +161,25 @@ class FtmsTrainer(BleakDevice, ControllableTrainer, Calibratable):
             connected or no response arrived within ``RESPONSE_TIMEOUT``.
         """
         client = self.client
-        if client is None:
-            return None
+        if client is None or not client.is_connected:
+            return None  # the link is going down: writing would fail after a delay
         async with self._lock:
             while not self._responses.empty():
                 self._responses.get_nowait()
+            started = time.monotonic()  # only for the log: how fast the trainer answers
+            log.debug("%s: write op 0x%02x %s", self.name, payload[0], payload[1:].hex(" "))
             await client.write_gatt_char(uuids.FTMS_CONTROL_POINT, payload, response=True)
             try:
                 while True:
                     resp = await asyncio.wait_for(self._responses.get(), self.RESPONSE_TIMEOUT)
                     if resp.request_op == payload[0]:
+                        log.debug(
+                            "%s: op 0x%02x answered %s in %.3f s",
+                            self.name,
+                            payload[0],
+                            resp.result,
+                            time.monotonic() - started,
+                        )
                         return resp
             except TimeoutError:
                 log.warning("%s: no response to op 0x%02x", self.name, payload[0])

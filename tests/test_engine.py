@@ -345,3 +345,51 @@ async def test_only_the_assigned_shifter_shifts():
     other.press(ObcButton.SHIFT_DOWN)
     assert shifts == [1]
     await hub.stop_all()
+
+
+@pytest.fixture
+def hanging_erg():
+    """A trainer ``set_erg`` that hangs until released, like a trainer dropping mid-write."""
+
+    class HangingErg:
+        def __init__(self) -> None:
+            self.sent: list[float] = []
+            self.release = asyncio.Event()
+
+        async def __call__(self, watts: float) -> None:
+            self.sent.append(watts)
+            await self.release.wait()
+
+    return HangingErg()
+
+
+async def test_a_hanging_trainer_command_doesnt_stall_the_ride(tmp_path, hanging_erg):
+    async with _engine(tmp_path) as (engine, trainer, world):
+        trainer.set_erg = hanging_erg
+        engine.control_wait_s = 0.01
+        engine.ride.start(None)
+        engine.controller.set_target(Mode.ERG, 150.0)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        for second, watts in enumerate((150.0, 180.0, 210.0)):
+            engine.controller.set_target(Mode.ERG, watts)
+            await engine.tick(now_wall=1_700_000_000 + second, now_mono=100.0 + second)
+        assert loop.time() - started < 0.5  # three ticks, none waiting for the trainer
+        assert engine.ride.seconds == 3
+        assert hanging_erg.sent == [150.0]  # one command in flight, none queued behind it
+        hanging_erg.release.set()
+        await asyncio.sleep(0)
+        await engine.tick(now_wall=1_700_000_003, now_mono=103.0)
+        assert hanging_erg.sent == [150.0, 210.0]  # then the current target, not the stale ones
+
+
+async def test_closing_the_engine_cancels_a_command_in_flight(tmp_path, hanging_erg):
+    async def ride_and_close() -> None:
+        async with _engine(tmp_path) as (engine, trainer, world):
+            trainer.set_erg = hanging_erg
+            engine.control_wait_s = 0.01
+            engine.controller.set_target(Mode.ERG, 150.0)
+            await engine.tick(now_wall=1_700_000_000, now_mono=100.0)
+            assert hanging_erg.sent == [150.0]
+
+    await asyncio.wait_for(ride_and_close(), 2.0)

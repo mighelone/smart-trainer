@@ -39,6 +39,9 @@ push a matching tag `vX.Y.Z`. See [Releasing](README.md#releasing).
   Finish buttons.
 
 ### Fixed
+- When the trainer drops the Bluetooth connection in the middle of a command (seen with a Zwift
+  Hub), the ride no longer freezes for a few seconds: recording and the workout clock carry on,
+  and the trainer gets the current target once it is back.
 - Info messages now reach the log: devices connecting and disconnecting, profile sync. Until now only warnings were shown in the terminal, and the desktop
   app's log file (`logs/smart-trainer.log`) stayed empty.
 

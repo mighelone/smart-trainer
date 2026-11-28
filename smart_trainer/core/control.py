@@ -428,7 +428,7 @@ class TrainerController:
             else:
                 await self.trainer.set_slope(rounded)
         except Exception as exc:
-            log.warning("trainer command failed: %s", exc)
+            log.warning("trainer command failed (%s %g): %s", mode.value, rounded, exc)
             self.last_command = None
             return None
         self.last_command = (mode, rounded)
